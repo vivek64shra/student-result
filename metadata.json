@@ -1,0 +1,6 @@
+{
+  "name": "Apex Student Portal",
+  "description": "माँ दुर्गा उच्च. माध्य. विद्यालय सेमरिया, जिला-रीवा (म.प्र.) - Official Digital Report Card & Academic Result Portal with All 21 Classes Google Sheets search, dynamic Max/Min marks calculation, Pramukh Admin Login, and visual performance graphs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
