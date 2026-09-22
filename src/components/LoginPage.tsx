@@ -1,36 +1,44 @@
 import React, { useState } from 'react';
-import { GraduationCap, ShieldCheck, Hash, FileText, Lock, Eye, EyeOff, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { 
+  GraduationCap, 
+  ShieldCheck, 
+  KeyRound, 
+  User, 
+  FileText, 
+  Hash, 
+  AlertCircle,
+  Building2,
+  Lock,
+  Loader2
+} from 'lucide-react';
 import { ParsedStudent, SCHOOL_INFO, SCHOOL_LOGO_URL } from '../utils/reportCardParser';
 
 interface LoginPageProps {
   students: ParsedStudent[];
   onAdminLoginSuccess: () => void;
-  onStudentLoginSuccess: (student: ParsedStudent) => void;
-  statusText?: string;
-  isLiveLoading?: boolean;
+  onStudentLoginSuccess: (student: ParsedStudent) => Promise<void> | void;
+  lastUpdated?: string;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({
   students,
   onAdminLoginSuccess,
   onStudentLoginSuccess,
-  statusText,
-  isLiveLoading,
 }) => {
   const [activeTab, setActiveTab] = useState<'student' | 'admin'>('student');
-
-  // Student Login State - strictly Scholar No and Roll No
+  
+  // Student Form State
   const [scholarNumber, setScholarNumber] = useState('');
   const [rollNumber, setRollNumber] = useState('');
   const [studentError, setStudentError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Admin Login State - strictly empty initially with no hints
+  // Admin Form State
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [adminError, setAdminError] = useState('');
 
-  const handleStudentSubmit = (e: React.FormEvent) => {
+  const handleStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStudentError('');
 
@@ -46,7 +54,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       return;
     }
 
-    // Match against loaded students list: both scholar number and roll number must match!
+    // Match against loaded students list
     const matched = students.find((s) => {
       const sScholar = String(s.scholarNo || '').trim().toLowerCase();
       const sRoll = String(s.rollNo || '').trim().toLowerCase();
@@ -54,7 +62,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     });
 
     if (matched) {
-      onStudentLoginSuccess(matched);
+      setIsLoggingIn(true);
+      try {
+        await onStudentLoginSuccess(matched);
+      } finally {
+        setIsLoggingIn(false);
+      }
     } else {
       setStudentError('अमान्य स्कॉलर नंबर अथवा रोल नंबर! कृपया स्कूल रिकॉर्ड अनुसार सही जानकारी दर्ज करें।');
     }
@@ -75,13 +88,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-[#0d2146] to-slate-950 flex flex-col justify-between p-4 sm:p-6 lg:p-8 font-sans selection:bg-blue-600 selection:text-white">
-      {/* Background Ambience */}
-      <div className="fixed inset-0 pointer-events-none opacity-20 bg-[radial-gradient(#3b82f6_1px,transparent_1px)] [background-size:24px_24px]" />
+    <div className="min-h-screen bg-gradient-to-br from-[#0c162c] via-[#122347] to-[#0a1224] flex flex-col justify-between p-3 sm:p-6 lg:p-8 font-sans selection:bg-blue-600 selection:text-white relative overflow-x-hidden">
+      {/* Subtle Background Pattern */}
+      <div className="fixed inset-0 pointer-events-none opacity-20 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:28px_28px]" />
+      <div className="fixed -top-40 -left-40 w-96 h-96 rounded-full bg-blue-600/15 blur-3xl pointer-events-none" />
+      <div className="fixed -bottom-40 -right-40 w-96 h-96 rounded-full bg-indigo-600/15 blur-3xl pointer-events-none" />
 
       {/* Header Container */}
-      <header className="relative z-10 text-center max-w-3xl mx-auto pt-2 pb-6">
-        <div className="inline-flex items-center justify-center p-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/20 shadow-xl mb-4">
+      <header className="relative z-10 text-center max-w-3xl mx-auto pt-2 pb-3 sm:pb-5">
+        <div className="inline-flex items-center justify-center p-1 rounded-full bg-white/10 backdrop-blur-md border border-white/20 shadow-xl mb-3">
           <img
             src={SCHOOL_LOGO_URL}
             alt="School Logo"
@@ -90,30 +105,29 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           />
         </div>
 
-        <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-white tracking-wide uppercase drop-shadow-md">
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-white tracking-wide drop-shadow-md">
           {SCHOOL_INFO.schoolName}
         </h1>
         <p className="text-xs sm:text-sm text-slate-300 font-medium mt-1">
-          डाइसकोड: {SCHOOL_INFO.diceCode} • संस्था कोड: {SCHOOL_INFO.institutionCode} • सत्र: {SCHOOL_INFO.academicSession}
+          {SCHOOL_INFO.location}
         </p>
 
-        {statusText && (
-          <div className="mt-3 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-xs text-slate-200">
-            {isLiveLoading ? (
-              <RefreshCw className="w-3.5 h-3.5 text-blue-300 animate-spin shrink-0" />
-            ) : (
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            )}
-            <span>{statusText}</span>
-          </div>
-        )}
+        {/* Institution Info Badges */}
+        <div className="mt-2.5 flex flex-wrap items-center justify-center gap-2 sm:gap-4 text-xs font-semibold text-slate-300">
+          <span className="px-3 py-1 rounded-full bg-white/10 backdrop-blur-xs border border-white/15">
+            डाइस कोड: <b className="font-mono text-amber-300">{SCHOOL_INFO.diceCode}</b>
+          </span>
+          <span className="px-3 py-1 rounded-full bg-white/10 backdrop-blur-xs border border-white/15">
+            संस्था कोड: <b className="font-mono text-amber-300">{SCHOOL_INFO.institutionCode}</b>
+          </span>
+        </div>
       </header>
 
       {/* Main Login Card */}
       <main className="relative z-10 w-full max-w-md mx-auto my-auto">
-        <div className="bg-white rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden backdrop-blur-sm">
+        <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
           {/* Dual Tab Switcher */}
-          <div className="grid grid-cols-2 p-1.5 bg-slate-100/90 border-b border-slate-200">
+          <div className="grid grid-cols-2 p-1.5 bg-slate-100 border-b border-slate-200">
             <button
               type="button"
               onClick={() => {
@@ -122,7 +136,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               }}
               className={`py-3 px-3 rounded-2xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
                 activeTab === 'student'
-                  ? 'bg-white text-[#1a73e8] shadow-md border border-slate-200/80'
+                  ? 'bg-white text-[#1a73e8] shadow-md border border-slate-200'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -147,29 +161,34 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             </button>
           </div>
 
-          {/* Form Content */}
-          <div className="p-6 sm:p-8">
+          <div className="p-5 sm:p-7">
             {activeTab === 'student' ? (
+              /* Student Login Form */
               <div>
-                <div className="text-center mb-6">
-                  <h2 className="text-lg sm:text-xl font-black text-slate-900">
-                    विद्यार्थी परीक्षा परिणाम लॉगिन
+                <div className="text-center mb-5">
+                  <h2 className="text-base sm:text-lg font-black text-slate-900">
+                    विद्यार्थी डिजिटल पोर्टल
                   </h2>
-                  <p className="text-xs text-slate-500 mt-1">
-                    अपना स्कॉलर नंबर एवं रोल नंबर दर्ज करें
+                  <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-[11px] font-bold text-blue-800">
+                    <span>🎓 परीक्षा परिणाम (Result)</span>
+                    <span>•</span>
+                    <span>💳 शुल्क विवरण (Fees)</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">
+                    लॉगिन करने के लिए स्कॉलर नंबर एवं रोल नंबर दर्ज करें
                   </p>
                 </div>
 
                 {studentError && (
-                  <div className="mb-5 p-3.5 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2.5 text-xs text-red-700 font-semibold animate-shake">
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2.5 text-xs text-red-700 font-semibold">
                     <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                     <span>{studentError}</span>
                   </div>
                 )}
 
-                <form onSubmit={handleStudentSubmit} className="space-y-4">
+                <form onSubmit={handleStudentSubmit} className="space-y-3.5">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                       स्कॉलर नंबर (Scholar No.)
                     </label>
                     <div className="relative">
@@ -181,15 +200,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                         value={scholarNumber}
                         onChange={(e) => setScholarNumber(e.target.value)}
                         placeholder="स्कॉलर नंबर दर्ज करें"
-                        className="w-full pl-10 pr-3.5 py-3 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-[#1a73e8] focus:border-[#1a73e8] outline-none transition-all placeholder:font-sans placeholder:font-normal placeholder:text-slate-400"
+                        className="w-full pl-10 pr-3.5 py-2.5 sm:py-3 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-[#1a73e8] focus:border-[#1a73e8] outline-none transition-all placeholder:font-sans placeholder:font-normal placeholder:text-slate-400"
                         autoComplete="off"
                         required
+                        disabled={isLoggingIn}
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                       रोल नंबर (Roll No.)
                     </label>
                     <div className="relative">
@@ -201,9 +221,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                         value={rollNumber}
                         onChange={(e) => setRollNumber(e.target.value)}
                         placeholder="रोल नंबर दर्ज करें"
-                        className="w-full pl-10 pr-3.5 py-3 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-[#1a73e8] focus:border-[#1a73e8] outline-none transition-all placeholder:font-sans placeholder:font-normal placeholder:text-slate-400"
+                        className="w-full pl-10 pr-3.5 py-2.5 sm:py-3 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-[#1a73e8] focus:border-[#1a73e8] outline-none transition-all placeholder:font-sans placeholder:font-normal placeholder:text-slate-400"
                         autoComplete="off"
                         required
+                        disabled={isLoggingIn}
                       />
                     </div>
                   </div>
@@ -211,47 +232,65 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   <div className="pt-2">
                     <button
                       type="submit"
-                      className="w-full py-3.5 px-4 bg-gradient-to-r from-[#1a73e8] to-[#1258b5] hover:from-blue-700 hover:to-blue-800 text-white font-extrabold text-sm sm:text-base rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
+                      disabled={isLoggingIn}
+                      className="w-full py-3 px-4 bg-gradient-to-r from-[#1a73e8] to-[#1258b5] hover:from-blue-700 hover:to-blue-800 text-white font-extrabold text-sm sm:text-base rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-75 disabled:cursor-not-allowed"
                     >
-                      <GraduationCap className="w-5 h-5" />
-                      <span>परिणाम व अंकसूची देखें</span>
+                      {isLoggingIn ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          <span>डेटा सिंक एवं लॉगिन हो रहा है...</span>
+                        </>
+                      ) : (
+                        <>
+                          <GraduationCap className="w-5 h-5" />
+                          <span>लॉगिन करें (Login)</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </form>
+
+                {/* Helpful Instruction Box */}
+                <div className="mt-4 pt-3 border-t border-slate-100 text-center">
+                  <p className="text-[11px] text-slate-500">
+                    स्कॉलर नंबर एवं रोल नंबर आपके विद्यालय प्रवेश पत्र अथवा पिछली रसीद पर उपलब्ध है।
+                  </p>
+                </div>
               </div>
             ) : (
+              /* Admin Login Form */
               <div>
-                <div className="text-center mb-6">
-                  <h2 className="text-lg sm:text-xl font-black text-slate-900">
-                    प्रशासक / संस्था प्रमुख लॉगिन
+                <div className="text-center mb-5">
+                  <h2 className="text-base sm:text-lg font-black text-slate-900">
+                    प्रशासक / प्रप्रमुख पोर्टल
                   </h2>
                   <p className="text-xs text-slate-500 mt-1">
-                    समस्त कक्षाओं का समग्र विश्लेषण एवं ग्राफ़िकल डैशबोर्ड
+                    संस्था प्रमुख / एडमिन क्रेडेंशियल्स दर्ज करें
                   </p>
                 </div>
 
                 {adminError && (
-                  <div className="mb-5 p-3.5 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2.5 text-xs text-red-700 font-semibold animate-shake">
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2.5 text-xs text-red-700 font-semibold">
                     <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                     <span>{adminError}</span>
                   </div>
                 )}
 
-                <form onSubmit={handleAdminSubmit} className="space-y-4">
+                <form onSubmit={handleAdminSubmit} className="space-y-3.5">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Admin User ID
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      यूजर आईडी (User ID)
                     </label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                        <Lock className="w-4 h-4" />
+                        <User className="w-4 h-4" />
                       </div>
                       <input
                         type="text"
                         value={adminUsername}
                         onChange={(e) => setAdminUsername(e.target.value)}
-                        placeholder="Admin User ID दर्ज करें"
-                        className="w-full pl-10 pr-3.5 py-3 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 outline-none transition-all placeholder:font-sans placeholder:font-normal placeholder:text-slate-400"
+                        placeholder="यूजर आईडी दर्ज करें"
+                        className="w-full pl-10 pr-3.5 py-2.5 sm:py-3 rounded-xl border border-slate-300 text-sm font-bold text-slate-900 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-blue-600 focus:border-blue-600 outline-none transition-all placeholder:font-normal placeholder:text-slate-400"
                         autoComplete="off"
                         required
                       />
@@ -259,38 +298,30 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Password
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      पासवर्ड (Password)
                     </label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                        <Lock className="w-4 h-4" />
+                        <KeyRound className="w-4 h-4" />
                       </div>
                       <input
-                        type={showPassword ? 'text' : 'password'}
+                        type="password"
                         value={adminPassword}
                         onChange={(e) => setAdminPassword(e.target.value)}
-                        placeholder="Password दर्ज करें"
-                        className="w-full pl-10 pr-10 py-3 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-indigo-600 focus:border-indigo-600 outline-none transition-all placeholder:font-sans placeholder:font-normal placeholder:text-slate-400"
-                        autoComplete="off"
+                        placeholder="पासवर्ड दर्ज करें"
+                        className="w-full pl-10 pr-3.5 py-2.5 sm:py-3 rounded-xl border border-slate-300 text-sm font-bold text-slate-900 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-blue-600 focus:border-blue-600 outline-none transition-all placeholder:font-normal placeholder:text-slate-400"
                         required
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 cursor-pointer"
-                      >
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
                     </div>
                   </div>
 
                   <div className="pt-2">
                     <button
                       type="submit"
-                      className="w-full py-3.5 px-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 hover:from-slate-800 hover:to-indigo-900 text-white font-extrabold text-sm sm:text-base rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
+                      className="w-full py-3 px-4 bg-gradient-to-r from-blue-700 to-indigo-800 hover:from-blue-800 hover:to-indigo-900 text-white font-extrabold text-sm sm:text-base rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
                     >
-                      <ShieldCheck className="w-5 h-5 text-amber-300" />
+                      <Lock className="w-4 h-4" />
                       <span>प्रशासक लॉगिन करें</span>
                     </button>
                   </div>
@@ -298,16 +329,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
             )}
           </div>
-
-          <div className="bg-slate-50/90 px-6 py-3.5 border-t border-slate-200 text-center text-xs text-slate-500 font-medium">
-            सुरक्षित एवं गोपनीय परीक्षा परिणाम पोर्टल • {SCHOOL_INFO.schoolName}
-          </div>
         </div>
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 text-center text-xs text-slate-400 py-4">
-        © {new Date().getFullYear()} {SCHOOL_INFO.schoolName} • सर्वाधिकार सुरक्षित
+      <footer className="relative z-10 text-center text-xs text-slate-400 py-3">
+        <p>© {SCHOOL_INFO.schoolName} • सर्वाधिकार सुरक्षित</p>
       </footer>
     </div>
   );
