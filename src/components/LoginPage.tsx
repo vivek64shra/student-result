@@ -7,23 +7,34 @@ import {
   FileText, 
   Hash, 
   AlertCircle,
-  Building2,
   Lock,
-  Loader2
+  Loader2,
+  ExternalLink,
+  MessageSquareText,
+  Globe,
+  HelpCircle
 } from 'lucide-react';
 import { ParsedStudent, SCHOOL_INFO, SCHOOL_LOGO_URL } from '../utils/reportCardParser';
+import { StudentFeeRecord, findStudentFeeRecord } from '../utils/feesParser';
+
+export const MAIN_SCHOOL_WEBSITE_URL = 'https://mdhsss.netlify.app/';
 
 interface LoginPageProps {
   students: ParsedStudent[];
+  fees?: StudentFeeRecord[];
   onAdminLoginSuccess: () => void;
   onStudentLoginSuccess: (student: ParsedStudent) => Promise<void> | void;
+  onSyncLiveData?: () => Promise<{ students: ParsedStudent[]; fees: StudentFeeRecord[] } | null>;
   lastUpdated?: string;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({
   students,
+  fees,
   onAdminLoginSuccess,
   onStudentLoginSuccess,
+  onSyncLiveData,
+  lastUpdated,
 }) => {
   const [activeTab, setActiveTab] = useState<'student' | 'admin'>('student');
   
@@ -32,44 +43,93 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [rollNumber, setRollNumber] = useState('');
   const [studentError, setStudentError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('');
 
   // Admin Form State
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [adminError, setAdminError] = useState('');
 
+  // Strict matching helper: Requires BOTH Scholar Number and Roll Number to match
+  const findMatch = (
+    studentList: ParsedStudent[],
+    schInput: string,
+    rollInput: string
+  ): ParsedStudent | undefined => {
+    const cleanScholar = schInput.trim().toLowerCase().replace(/\s+/g, '');
+    const cleanRoll = rollInput.trim().toLowerCase().replace(/\s+/g, '');
+
+    // Strictly requires both inputs
+    if (!cleanScholar || !cleanRoll) return undefined;
+
+    const numScholar = parseInt(cleanScholar, 10);
+    const numRoll = parseInt(cleanRoll, 10);
+
+    for (const s of studentList) {
+      const sSch = String(s.scholarNo || '').trim().toLowerCase().replace(/\s+/g, '');
+      const sRoll = String(s.rollNo || '').trim().toLowerCase().replace(/\s+/g, '');
+
+      // Strict rule: If student record in data has NO roll number, login is NOT permitted
+      if (!sRoll || sRoll === '-' || sRoll === 'null' || sRoll === 'undefined') {
+        continue;
+      }
+
+      const sNumSch = parseInt(sSch, 10);
+      const sNumRoll = parseInt(sRoll, 10);
+
+      const scholarMatches = (sSch === cleanScholar) || (!isNaN(numScholar) && sNumSch === numScholar);
+      const rollMatches = (sRoll === cleanRoll) || (!isNaN(numRoll) && sNumRoll === numRoll);
+
+      // BOTH Scholar Number and Roll Number MUST match
+      if (scholarMatches && rollMatches) {
+        return s;
+      }
+    }
+
+    return undefined;
+  };
+
   const handleStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStudentError('');
 
-    const trimmedScholar = scholarNumber.trim().toLowerCase();
-    const trimmedRoll = rollNumber.trim().toLowerCase();
+    const trimmedScholar = scholarNumber.trim();
+    const trimmedRoll = rollNumber.trim();
 
-    if (!trimmedScholar) {
-      setStudentError('कृपया स्कॉलर नंबर दर्ज करें।');
-      return;
-    }
-    if (!trimmedRoll) {
-      setStudentError('कृपया रोल नंबर दर्ज करें।');
+    // Strict validation: Both are mandatory
+    if (!trimmedScholar || !trimmedRoll) {
+      setStudentError('लॉगिन के लिए स्कॉलर नंबर एवं रोल नंबर दोनों दर्ज करना अनिवार्य है।');
       return;
     }
 
-    // Match against loaded students list
-    const matched = students.find((s) => {
-      const sScholar = String(s.scholarNo || '').trim().toLowerCase();
-      const sRoll = String(s.rollNo || '').trim().toLowerCase();
-      return sScholar === trimmedScholar && sRoll === trimmedRoll;
-    });
+    setIsLoggingIn(true);
+    setSyncStatus('');
 
-    if (matched) {
-      setIsLoggingIn(true);
-      try {
-        await onStudentLoginSuccess(matched);
-      } finally {
-        setIsLoggingIn(false);
+    try {
+      // 1. Check in currently loaded student list
+      let matched = findMatch(students, trimmedScholar, trimmedRoll);
+
+      // 2. If not found in memory, immediately fetch live Google Sheets data and retry
+      if (!matched && onSyncLiveData) {
+        setSyncStatus('नवीनतम रिकॉर्ड प्राप्त किया जा रहा है...');
+        try {
+          const freshData = await onSyncLiveData();
+          if (freshData?.students) {
+            matched = findMatch(freshData.students, trimmedScholar, trimmedRoll);
+          }
+        } catch (fetchErr) {
+          console.warn('Instant fetch on login failed:', fetchErr);
+        }
       }
-    } else {
-      setStudentError('अमान्य स्कॉलर नंबर अथवा रोल नंबर! कृपया स्कूल रिकॉर्ड अनुसार सही जानकारी दर्ज करें।');
+
+      if (matched) {
+        await onStudentLoginSuccess(matched);
+      } else {
+        setStudentError('अमान्य स्कॉलर नंबर अथवा रोल नंबर! कृपया सही स्कॉलर नंबर एवं रोल नंबर दर्ज करें। यदि डेटा में रोल नंबर उपलब्ध नहीं है तो लॉगिन संभव नहीं है।');
+      }
+    } finally {
+      setIsLoggingIn(false);
+      setSyncStatus('');
     }
   };
 
@@ -80,7 +140,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     const u = adminUsername.trim();
     const p = adminPassword.trim();
 
-    if (u === 'Vivek@' && p === 'Vivek@') {
+    if (u === 'Vivek@' && p === 'Vivek64@') {
       onAdminLoginSuccess();
     } else {
       setAdminError('अमान्य क्रेडेंशियल्स! सही User ID एवं Password दर्ज करें।');
@@ -94,8 +154,35 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       <div className="fixed -top-40 -left-40 w-96 h-96 rounded-full bg-blue-600/15 blur-3xl pointer-events-none" />
       <div className="fixed -bottom-40 -right-40 w-96 h-96 rounded-full bg-indigo-600/15 blur-3xl pointer-events-none" />
 
-      {/* Header Container */}
-      <header className="relative z-10 text-center max-w-3xl mx-auto pt-2 pb-3 sm:pb-5">
+      {/* Top Header with Quick Links */}
+      <header className="relative z-10 text-center max-w-3xl mx-auto pt-2 pb-3 sm:pb-5 w-full">
+        {/* Main Website & Feedback Direct Bar (Hidden when printing) */}
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3 px-2 print:hidden print-hidden">
+          <a
+            href={MAIN_SCHOOL_WEBSITE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="माँ दुर्गा उ.मा. विद्यालय मुख्य वेबसाइट खोलें"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 backdrop-blur-md transition-all shadow-xs group"
+          >
+            <Globe className="w-3.5 h-3.5 text-sky-400 group-hover:rotate-12 transition-transform" />
+            <span>विद्यालय मुख्य पृष्ठ (Main Website)</span>
+            <ExternalLink className="w-3 h-3 text-slate-300" />
+          </a>
+
+          <a
+            href={MAIN_SCHOOL_WEBSITE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="किसी भी समस्या या फीडबैक के लिए यहाँ क्लिक करें"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-amber-200 text-xs font-extrabold border border-amber-400/40 backdrop-blur-md transition-all shadow-xs"
+          >
+            <MessageSquareText className="w-3.5 h-3.5 text-amber-400" />
+            <span>फीडबैक / Any Query</span>
+            <ExternalLink className="w-3 h-3 text-amber-300" />
+          </a>
+        </div>
+
         <div className="inline-flex items-center justify-center p-1 rounded-full bg-white/10 backdrop-blur-md border border-white/20 shadow-xl mb-3">
           <img
             src={SCHOOL_LOGO_URL}
@@ -120,6 +207,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           <span className="px-3 py-1 rounded-full bg-white/10 backdrop-blur-xs border border-white/15">
             संस्था कोड: <b className="font-mono text-amber-300">{SCHOOL_INFO.institutionCode}</b>
           </span>
+          {lastUpdated && (
+            <span className="px-3 py-1 rounded-full bg-white/10 backdrop-blur-xs border border-white/15 text-slate-300">
+              अद्यतन: <b className="text-emerald-300 font-mono">{lastUpdated}</b>
+            </span>
+          )}
         </div>
       </header>
 
@@ -175,7 +267,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     <span>💳 शुल्क विवरण (Fees)</span>
                   </div>
                   <p className="text-xs text-slate-500 mt-2">
-                    लॉगिन करने के लिए स्कॉलर नंबर एवं रोल नंबर दर्ज करें
+                    स्कॉलर नंबर एवं रोल नंबर दोनों दर्ज कर लॉगिन करें
                   </p>
                 </div>
 
@@ -189,7 +281,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 <form onSubmit={handleStudentSubmit} className="space-y-3.5">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      स्कॉलर नंबर (Scholar No.)
+                      स्कॉलर नंबर (Scholar Number) *
                     </label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -210,7 +302,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      रोल नंबर (Roll No.)
+                      रोल नंबर (Roll Number) *
                     </label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -238,7 +330,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       {isLoggingIn ? (
                         <>
                           <Loader2 className="w-5 h-5 animate-spin" />
-                          <span>डेटा सिंक एवं लॉगिन हो रहा है...</span>
+                          <span>{syncStatus || 'डेटा सिंक एवं लॉगिन हो रहा है...'}</span>
                         </>
                       ) : (
                         <>
@@ -251,9 +343,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 </form>
 
                 {/* Helpful Instruction Box */}
-                <div className="mt-4 pt-3 border-t border-slate-100 text-center">
-                  <p className="text-[11px] text-slate-500">
-                    स्कॉलर नंबर एवं रोल नंबर आपके विद्यालय प्रवेश पत्र अथवा पिछली रसीद पर उपलब्ध है।
+                <div className="mt-3.5 pt-2.5 border-t border-slate-100 text-center">
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    लॉगिन हेतु स्कॉलर नंबर एवं रोल नंबर दोनों आवश्यक हैं। दोनों विवरण सही होने पर ही लॉगिन होगा।
                   </p>
                 </div>
               </div>
@@ -330,11 +422,60 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             )}
           </div>
         </div>
+
+        {/* User-Friendly Help & Feedback Section (For Any Query) */}
+        <div className="mt-4 p-4 bg-slate-900/80 backdrop-blur-md rounded-2xl border border-slate-700/80 shadow-lg text-slate-200 print:hidden print-hidden">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0 mt-0.5 border border-amber-500/30">
+              <MessageSquareText className="w-5 h-5" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-1.5">
+                <span>किसी भी समस्या या फीडबैक के लिए</span>
+                <span className="text-[11px] font-normal text-amber-300">(For Any Query / Feedback)</span>
+              </h3>
+              <p className="text-[11px] sm:text-xs text-slate-300 mt-1 leading-relaxed">
+                लॉगिन, परिणाम या शुल्क में किसी भी समस्या अथवा सुझाव के लिए सीधे मुख्य वेबसाइट के फीडबैक विकल्प से संपर्क करें:
+              </p>
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                <a
+                  href={MAIN_SCHOOL_WEBSITE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black rounded-xl text-xs shadow-md transition-all transform hover:-translate-y-0.5"
+                >
+                  <MessageSquareText className="w-3.5 h-3.5 text-slate-950" />
+                  <span>फीडबैक भेजें / समस्या दर्ज करें ↗</span>
+                </a>
+                <a
+                  href={MAIN_SCHOOL_WEBSITE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs border border-white/20 transition-all"
+                >
+                  <Globe className="w-3.5 h-3.5 text-sky-400" />
+                  <span>मुख्य पृष्ठ (Main Website) ↗</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 text-center text-xs text-slate-400 py-3">
-        <p>© {SCHOOL_INFO.schoolName} • सर्वाधिकार सुरक्षित</p>
+      <footer className="relative z-10 text-center text-xs text-slate-400 py-3 print:hidden print-hidden">
+        <p className="flex flex-wrap items-center justify-center gap-1.5">
+          <span>© {SCHOOL_INFO.schoolName}</span>
+          <span>•</span>
+          <a
+            href={MAIN_SCHOOL_WEBSITE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sky-400 hover:underline inline-flex items-center gap-0.5"
+          >
+            <span>mdhsss.netlify.app ↗</span>
+          </a>
+        </p>
       </footer>
     </div>
   );

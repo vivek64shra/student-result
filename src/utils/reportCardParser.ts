@@ -1,4 +1,5 @@
 import cachedData from '../data/cachedSheetData.json';
+import cachedFeesData from '../data/cachedFeesData.json';
 import * as XLSX from 'xlsx';
 
 export interface SchoolInfo {
@@ -567,21 +568,115 @@ export function parseSheetDatabase(sheetsDb: Record<string, any[][]>): ParsedStu
   return allStudents;
 }
 
+export function mergeStudentsWithFeesData(
+  students: ParsedStudent[],
+  feesRecords: any[] = cachedFeesData
+): ParsedStudent[] {
+  const existingScholarKeys = new Set(
+    students.map((s) => String(s.scholarNo || '').trim().toLowerCase()).filter(Boolean)
+  );
+  const existingNameFatherKeys = new Set(
+    students.map(
+      (s) => `${String(s.name || '').trim().toLowerCase()}_${String(s.fatherName || '').trim().toLowerCase()}`
+    )
+  );
+
+  const merged = [...students];
+
+  feesRecords.forEach((f: any) => {
+    const rawScholar = f['Scholar No'] !== undefined ? String(f['Scholar No']).trim() : '';
+    const rawName = f['Student Name'] !== undefined ? String(f['Student Name']).trim() : '';
+    const rawFather = f['Father Name'] !== undefined ? String(f['Father Name']).trim() : '';
+    const rawClass = f['Class Name'] !== undefined ? String(f['Class Name']).trim() : '';
+
+    if (!rawScholar && !rawName) return;
+
+    const lowerScholar = rawScholar.toLowerCase();
+    const nameFatherKey = `${rawName.toLowerCase()}_${rawFather.toLowerCase()}`;
+
+    if (
+      (lowerScholar && existingScholarKeys.has(lowerScholar)) ||
+      (rawName && existingNameFatherKeys.has(nameFatherKey))
+    ) {
+      return;
+    }
+
+    if (lowerScholar) existingScholarKeys.add(lowerScholar);
+    if (rawName) existingNameFatherKeys.add(nameFatherKey);
+
+    merged.push({
+      scholarNo: rawScholar,
+      rollNo: rawScholar, // Use scholar number as fallback roll number for student lookup
+      name: rawName,
+      fatherName: rawFather,
+      mobile: '',
+      className: rawClass || 'General',
+      sheetName: '',
+      quarterly: null,
+      halfYearly: null,
+      annual: null,
+      rawRow: [],
+    });
+  });
+
+  return merged;
+}
+
+export function hasStudentAnyExamData(student: ParsedStudent | null | undefined): boolean {
+  if (!student) return false;
+  const isSectionValid = (sec: ExamSectionData | null | undefined) => {
+    if (!sec || !sec.rows || sec.rows.length === 0) return false;
+    const hasScores = sec.rows.some((r) => {
+      const t = String(r.theory ?? '').trim();
+      const p = String(r.project ?? '').trim();
+      const tot = String(r.total ?? '').trim();
+      return (
+        (t !== '' && t !== '-' && t !== '0' && t !== 'null' && t !== 'undefined') ||
+        (p !== '' && p !== '-' && p !== '0' && p !== 'null' && p !== 'undefined') ||
+        (tot !== '' && tot !== '-' && tot !== '0' && tot !== 'null' && tot !== 'undefined')
+      );
+    });
+    const grandTot = Number(sec.grandTotal) || 0;
+    return hasScores || grandTot > 0;
+  };
+  return isSectionValid(student.quarterly) || isSectionValid(student.halfYearly) || isSectionValid(student.annual);
+}
+
 export function getInitialCachedStudents(): { db: Record<string, any[][]>; students: ParsedStudent[] } {
   const db = cachedData as unknown as Record<string, any[][]>;
-  const students = parseSheetDatabase(db);
+  const parsed = parseSheetDatabase(db);
+  const students = mergeStudentsWithFeesData(parsed);
   return { db, students };
 }
 
 export async function fetchLiveGoogleSheetData(): Promise<{ db: Record<string, any[][]>; students: ParsedStudent[] }> {
   try {
-    const res = await fetch(GOOGLE_SHEETS_EXPORT_URL);
-    if (!res.ok) {
-      throw new Error(`HTTP Error: ${res.status}`);
+    let arrayBuffer: ArrayBuffer | null = null;
+    try {
+      const res = await fetch(GOOGLE_SHEETS_EXPORT_URL);
+      if (res.ok) {
+        arrayBuffer = await res.arrayBuffer();
+      }
+    } catch (directErr) {
+      console.warn('Direct Google Sheet fetch failed, trying proxy endpoint...', directErr);
     }
-    const arrayBuffer = await res.arrayBuffer();
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 
+    if (!arrayBuffer) {
+      try {
+        const proxyRes = await fetch('/api/proxy/sheet');
+        if (proxyRes.ok) {
+          arrayBuffer = await proxyRes.arrayBuffer();
+        }
+      } catch (proxyErr) {
+        console.warn('Proxy Google Sheet fetch failed:', proxyErr);
+      }
+    }
+
+    if (!arrayBuffer) {
+      throw new Error('Unable to retrieve sheet from direct or proxy endpoints');
+    }
+
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
     const newDb: Record<string, any[][]> = {};
 
     workbook.SheetNames.forEach((sheetName) => {
@@ -598,7 +693,8 @@ export async function fetchLiveGoogleSheetData(): Promise<{ db: Record<string, a
       }
     });
 
-    const students = parseSheetDatabase(newDb);
+    const parsed = parseSheetDatabase(newDb);
+    const students = mergeStudentsWithFeesData(parsed);
     return { db: newDb, students };
   } catch (err: any) {
     console.warn('Failed to fetch live results from Google Sheets, using cached data:', err.message);

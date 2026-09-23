@@ -8,15 +8,20 @@ import {
   PhoneCall, 
   HelpCircle,
   ArrowLeft,
-  Sparkles
+  Sparkles,
+  Globe,
+  MessageSquareText,
+  ExternalLink
 } from 'lucide-react';
 import { ParsedStudent, SCHOOL_INFO, SCHOOL_LOGO_URL, DEFAULT_UPDATE_TIMESTAMP } from '../utils/reportCardParser';
+import { MAIN_SCHOOL_WEBSITE_URL } from './LoginPage';
 
 interface OfficialReportCardProps {
   student: ParsedStudent;
   onPrint?: () => void;
   onLogout?: () => void;
   onBack?: () => void;
+  onViewFees?: () => void;
   lastUpdated?: string;
 }
 
@@ -25,6 +30,7 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
   onPrint,
   onLogout,
   onBack,
+  onViewFees,
   lastUpdated,
 }) => {
   const handlePrint = () => {
@@ -361,19 +367,32 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
               {hasAnnual && renderExamSection(student.annual)}
             </div>
           ) : (
-            <div className="border-2 border-dashed border-amber-300 bg-amber-50/90 rounded-2xl p-6 sm:p-10 text-center my-4">
-              <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto mb-2.5">
-                <AlertCircle className="w-6 h-6" />
+            <div className="border-2 border-dashed border-amber-400 bg-amber-50/95 rounded-2xl p-6 sm:p-10 text-center my-4 shadow-xs">
+              <div className="w-14 h-14 rounded-full bg-amber-100 border border-amber-300 text-amber-800 flex items-center justify-center mx-auto mb-3 shadow-2xs">
+                <AlertCircle className="w-7 h-7 text-amber-700" />
               </div>
-              <h3 className="text-base sm:text-lg font-bold text-slate-900 mb-1">
-                परीक्षा परिणाम अभी अद्यतन (Update) नहीं हुआ है
+              <h3 className="text-lg sm:text-xl font-black text-slate-900 mb-1.5 leading-snug">
+                अभी रिजल्ट पब्लिश नहीं हुआ है, कृपया विद्यालय ऑफिस में संपर्क करें
               </h3>
-              <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto mb-3">
-                विद्यार्थी <strong>{student.name}</strong> का परिणाम विद्यालय द्वारा अभी संकलित किया जा रहा है।
+              <p className="text-xs sm:text-sm text-slate-700 max-w-lg mx-auto mb-4 font-medium leading-relaxed">
+                विद्यार्थी <strong>{student.name}</strong> (कक्षा: {student.className}, स्कॉलर नं.: {student.scholarNo}) का परीक्षा परिणाम विद्यालय कार्यालय द्वारा अभी पब्लिश (जारी) नहीं किया गया है।
               </p>
-              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold text-amber-900">
-                <School className="w-4 h-4 text-amber-700" />
-                <span>कृपया अपने विद्यालय कार्यालय से संपर्क करें।</span>
+
+              <div className="flex flex-wrap items-center justify-center gap-2.5">
+                {onViewFees && (
+                  <button
+                    type="button"
+                    onClick={onViewFees}
+                    className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                  >
+                    <span>💳 देय शुल्क विवरण देखें (View Fees)</span>
+                  </button>
+                )}
+
+                <div className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-bold text-amber-900 shadow-2xs">
+                  <School className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>कार्यालय संपर्क: {SCHOOL_INFO.location}</span>
+                </div>
               </div>
             </div>
           )}
@@ -407,37 +426,63 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
         </div>
 
         {/* Bottom Actions (Hidden during print) */}
-        <div className="mt-4 print:hidden relative z-10 flex flex-col sm:flex-row items-center gap-2">
-          {onBack && (
+        <div className="mt-4 print:hidden print-hidden relative z-10 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs sm:text-sm rounded-xl border border-slate-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>← मुख्य विकल्प</span>
+              </button>
+            )}
+
+            <a
+              href={MAIN_SCHOOL_WEBSITE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full sm:w-auto px-3.5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              title="किसी भी समस्या या फीडबैक के लिए यहाँ क्लिक करें"
+            >
+              <MessageSquareText className="w-4 h-4" />
+              <span>समस्या / फीडबैक दर्ज करें ↗</span>
+            </a>
+
+            <a
+              href={MAIN_SCHOOL_WEBSITE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full sm:w-auto px-3 py-2.5 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs sm:text-sm rounded-xl border border-slate-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              title="माँ दुर्गा उ.मा. विद्यालय मुख्य पृष्ठ"
+            >
+              <Globe className="w-4 h-4 text-blue-600" />
+              <span>मुख्य पृष्ठ ↗</span>
+            </a>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
             <button
               type="button"
-              onClick={onBack}
-              className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs sm:text-sm rounded-xl border border-slate-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              onClick={handlePrint}
+              className="w-full sm:w-auto py-2.5 px-5 bg-gradient-to-r from-[#28a745] to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
-              <ArrowLeft className="w-4 h-4" />
-              <span>← मुख्य विकल्प (Back to Options)</span>
+              <Printer className="w-4 h-4" />
+              <span>अंकसूची प्रिंट करें (Print)</span>
             </button>
-          )}
 
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="w-full sm:flex-1 py-2.5 px-4 bg-gradient-to-r from-[#28a745] to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <Printer className="w-4 h-4" />
-            <span>अंकसूची प्रिंट करें (Print)</span>
-          </button>
-
-          {onLogout && (
-            <button
-              type="button"
-              onClick={onLogout}
-              className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <LogOut className="w-4 h-4 text-red-400" />
-              <span>लॉगआउट</span>
-            </button>
-          )}
+            {onLogout && (
+              <button
+                type="button"
+                onClick={onLogout}
+                className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <LogOut className="w-4 h-4 text-red-400" />
+                <span>लॉगआउट</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

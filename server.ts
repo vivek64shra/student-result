@@ -21,6 +21,41 @@ async function startServer() {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
+  // Google Sheets Proxy Endpoints (guarantees fast, reliable, CORS-free fetching on mobile networks)
+  app.get('/api/proxy/sheet', async (_req, res) => {
+    try {
+      const response = await fetch(
+        'https://docs.google.com/spreadsheets/d/e/2PACX-1vTJACfw2mytnCs_RBtLI4UbW5DKj15umzZJ36XNybQqCLn9wYmkeJKu_M8lTbKEG9-1mNlO3D8R1Kf6/pub?output=xlsx',
+        { headers: { 'User-Agent': 'Mozilla/5.0' } }
+      );
+      if (!response.ok) {
+        return res.status(response.status).send('Failed to fetch sheet from Google');
+      }
+      const buffer = await response.arrayBuffer();
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.send(Buffer.from(buffer));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/proxy/fees', async (_req, res) => {
+    try {
+      const response = await fetch(
+        'https://docs.google.com/spreadsheets/d/e/2PACX-1vSv0gTbGo5P8wkB4CYuVIWzvXDOu1INb_L8beoaLYrXIyw9noqOIIln5PxxlP2S9apBakQfq48_YLZ8/pub?output=csv',
+        { headers: { 'User-Agent': 'Mozilla/5.0' } }
+      );
+      if (!response.ok) {
+        return res.status(response.status).send('Failed to fetch fees from Google');
+      }
+      const text = await response.text();
+      res.setHeader('Content-Type', 'text/csv');
+      res.send(text);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // AI Recommendations API for Academic Diagnostics & Interventions
   app.post('/api/ai-recommendations', async (req, res) => {
     try {

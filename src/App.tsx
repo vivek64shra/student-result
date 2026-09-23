@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   SCHOOL_INFO, 
   SCHOOL_LOGO_URL,
@@ -6,6 +6,7 @@ import {
   getInitialCachedStudents, 
   fetchLiveGoogleSheetData,
   formatUpdateTimestamp,
+  hasStudentAnyExamData,
   DEFAULT_UPDATE_TIMESTAMP
 } from './utils/reportCardParser';
 import {
@@ -15,7 +16,7 @@ import {
   findStudentFeeRecord,
   getAcademicSessionInfo
 } from './utils/feesParser';
-import { LoginPage } from './components/LoginPage';
+import { LoginPage, MAIN_SCHOOL_WEBSITE_URL } from './components/LoginPage';
 import { OfficialReportCard } from './components/OfficialReportCard';
 import { StudentFeesView } from './components/StudentFeesView';
 import { StudentSearchArea } from './components/StudentSearchArea';
@@ -36,11 +37,14 @@ import {
   Sparkles,
   ReceiptText,
   FileCheck2,
-  PhoneCall
+  PhoneCall,
+  Globe,
+  ExternalLink,
+  MessageSquareText
 } from 'lucide-react';
 
 export default function App() {
-  // Pre-cached instant dataset: 0ms load, NO sheet fetch on initial home page!
+  // Pre-cached instant dataset: 0ms load
   const [students, setStudents] = useState<ParsedStudent[]>(() => {
     return getInitialCachedStudents().students;
   });
@@ -54,7 +58,6 @@ export default function App() {
   const [loggedInStudent, setLoggedInStudent] = useState<ParsedStudent | null>(null);
   
   // Student Portal Navigation: 'menu' (first) | 'result' | 'fees'
-  // REQUIREMENT: "login ke baad pahle 2 optin aae jab tik kare tabhi result aur fees open ho"
   const [studentPortalTab, setStudentPortalTab] = useState<'menu' | 'result' | 'fees'>('menu');
 
   // Admin search state
@@ -68,17 +71,21 @@ export default function App() {
   const [showAdminLogin, setShowAdminLogin] = useState<boolean>(false);
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
 
-  // Synchronize Google Sheets ONLY upon login (NOT on home page load!)
-  // REQUIREMENT: "jab login kare tab excel se dta shink kare baki home page normal khule jaise ki koi excel sheet add n ho"
-  const syncLiveSheetData = async (targetStudent?: ParsedStudent) => {
+  // Synchronize Google Sheets and Fees data
+  const syncLiveSheetData = async (
+    targetStudent?: ParsedStudent
+  ): Promise<{ students: ParsedStudent[]; fees: StudentFeeRecord[] } | null> => {
     try {
       const [resultData, feeData] = await Promise.allSettled([
         fetchLiveGoogleSheetData(),
         fetchLiveFeesData()
       ]);
 
+      let freshStudents = students;
+      let freshFees = fees;
+
       if (resultData.status === 'fulfilled' && resultData.value?.students?.length > 0) {
-        const freshStudents = resultData.value.students;
+        freshStudents = resultData.value.students;
         setStudents(freshStudents);
         setLastUpdated(formatUpdateTimestamp(new Date()));
 
@@ -95,12 +102,21 @@ export default function App() {
       }
 
       if (feeData.status === 'fulfilled' && feeData.value?.length > 0) {
-        setFees(feeData.value);
+        freshFees = feeData.value;
+        setFees(freshFees);
       }
+
+      return { students: freshStudents, fees: freshFees };
     } catch (err: any) {
-      console.warn('Live sync on login completed/handled:', err.message);
+      console.warn('Live sync completed/handled:', err.message);
+      return null;
     }
   };
+
+  // Pre-fetch live data in background immediately upon mount so students can login instantly
+  useEffect(() => {
+    syncLiveSheetData();
+  }, []);
 
   const handleLogout = () => {
     setAuthMode('unauthenticated');
@@ -170,8 +186,11 @@ export default function App() {
     return (
       <LoginPage
         students={students}
+        fees={fees}
         onAdminLoginSuccess={handleAdminLoginSuccess}
         onStudentLoginSuccess={handleStudentLoginSuccess}
+        onSyncLiveData={syncLiveSheetData}
+        lastUpdated={lastUpdated}
       />
     );
   }
@@ -187,9 +206,9 @@ export default function App() {
       loggedInStudent.name
     );
     const sessionInfo = getAcademicSessionInfo();
+    const studentHasResult = hasStudentAnyExamData(loggedInStudent);
 
     // SUB-VIEW 2A: The 2 Options Choice Menu (Shown right after login)
-    // REQUIREMENT: "login ke baad pahle 2 optin aae jab tik kare tabhi result aur fees open ho"
     if (studentPortalTab === 'menu') {
       return (
         <div className="min-h-screen bg-[#f1f4f9] p-3 sm:p-6 md:p-8 text-slate-900 font-sans flex flex-col justify-between">
@@ -220,14 +239,27 @@ export default function App() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-              >
-                <LogOut className="w-4 h-4 text-red-400" />
-                <span>लॉगआउट (Logout)</span>
-              </button>
+              <div className="flex items-center gap-2 print:hidden print-hidden">
+                <a
+                  href={MAIN_SCHOOL_WEBSITE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs sm:text-sm rounded-xl border border-slate-300 shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer"
+                  title="माँ दुर्गा उ.मा. विद्यालय मुख्य पृष्ठ खोलें"
+                >
+                  <Globe className="w-3.5 h-3.5 text-blue-600" />
+                  <span>मुख्य पृष्ठ ↗</span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4 text-red-400" />
+                  <span>लॉगआउट (Logout)</span>
+                </button>
+              </div>
             </div>
 
             {/* Instruction Banner */}
@@ -248,23 +280,41 @@ export default function App() {
                 onClick={() => setStudentPortalTab('result')}
                 role="button"
                 tabIndex={0}
-                className="group relative bg-white hover:bg-gradient-to-br hover:from-white hover:to-blue-50/50 p-6 sm:p-7 rounded-3xl border-2 border-slate-200 hover:border-[#1a73e8] shadow-md hover:shadow-xl transition-all cursor-pointer transform hover:-translate-y-1 text-left"
+                className={`group relative bg-white hover:bg-gradient-to-br hover:from-white hover:to-blue-50/50 p-6 sm:p-7 rounded-3xl border-2 shadow-md hover:shadow-xl transition-all cursor-pointer transform hover:-translate-y-1 text-left ${
+                  studentHasResult
+                    ? 'border-slate-200 hover:border-[#1a73e8]'
+                    : 'border-amber-200 hover:border-amber-400'
+                }`}
               >
                 <div className="flex items-center justify-between mb-4">
-                  <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#1a73e8] border border-blue-200 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center group-hover:scale-110 transition-transform ${
+                    studentHasResult
+                      ? 'bg-blue-50 text-[#1a73e8] border-blue-200'
+                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}>
                     <Award className="w-7 h-7" />
                   </div>
-                  <span className="text-xs font-black px-3 py-1 bg-blue-100 text-blue-900 rounded-full">
-                    विकल्प 1
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {!studentHasResult ? (
+                      <span className="text-[11px] font-black px-2.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded-full">
+                        रिजल्ट प्रतीक्षारत
+                      </span>
+                    ) : (
+                      <span className="text-xs font-black px-3 py-1 bg-blue-100 text-blue-900 rounded-full">
+                        विकल्प 1
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <h3 className="text-lg sm:text-xl font-black text-slate-900 group-hover:text-[#1a73e8] transition-colors mb-2 flex items-center gap-2">
                   <span>1. परीक्षा परिणाम (Result)</span>
                 </h3>
 
-                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed mb-5">
-                  वार्षिक परीक्षा अंकसूची, विषयवार सैद्धांतिक व प्रोजेक्ट अंक, कुल प्राप्तांक, प्रतिशत एवं आधिकारिक रिपोर्ट कार्ड देखें व प्रिंट करें।
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed mb-4">
+                  {studentHasResult
+                    ? 'वार्षिक परीक्षा अंकसूची, विषयवार सैद्धांतिक व प्रोजेक्ट अंक, कुल प्राप्तांक, प्रतिशत एवं आधिकारिक रिपोर्ट कार्ड देखें व प्रिंट करें।'
+                    : 'परीक्षा परिणाम अभी पब्लिश (जारी) नहीं हुआ है। परिणाम विवरण देखने के लिए क्लिक करें अथवा नीचे विकल्प 2 से शुल्क देखें।'}
                 </p>
 
                 <div className="flex flex-wrap gap-1.5 mb-5 text-[11px] font-bold text-slate-600">
@@ -274,7 +324,7 @@ export default function App() {
                 </div>
 
                 <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs sm:text-sm font-extrabold text-[#1a73e8]">
-                  <span>अंकसूची देखें (View Report Card)</span>
+                  <span>{studentHasResult ? 'अंकसूची देखें (View Report Card)' : 'स्थिति देखें (Check Status)'}</span>
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
                 </div>
               </div>
@@ -284,15 +334,20 @@ export default function App() {
                 onClick={() => setStudentPortalTab('fees')}
                 role="button"
                 tabIndex={0}
-                className="group relative bg-white hover:bg-gradient-to-br hover:from-white hover:to-emerald-50/50 p-6 sm:p-7 rounded-3xl border-2 border-slate-200 hover:border-emerald-600 shadow-md hover:shadow-xl transition-all cursor-pointer transform hover:-translate-y-1 text-left"
+                className="group relative bg-white hover:bg-gradient-to-br hover:from-white hover:to-emerald-50/50 p-6 sm:p-7 rounded-3xl border-2 border-emerald-300 hover:border-emerald-600 shadow-md hover:shadow-xl transition-all cursor-pointer transform hover:-translate-y-1 text-left ring-2 ring-emerald-500/20"
               >
                 <div className="flex items-center justify-between mb-4">
                   <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center group-hover:scale-110 transition-transform">
                     <CreditCard className="w-7 h-7" />
                   </div>
-                  <span className="text-xs font-black px-3 py-1 bg-emerald-100 text-emerald-900 rounded-full">
-                    विकल्प 2
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-black px-2.5 py-0.5 bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-full">
+                      सक्रिय / उपलब्ध
+                    </span>
+                    <span className="text-xs font-black px-3 py-1 bg-emerald-800 text-white rounded-full">
+                      विकल्प 2
+                    </span>
+                  </div>
                 </div>
 
                 <h3 className="text-lg sm:text-xl font-black text-slate-900 group-hover:text-emerald-700 transition-colors mb-2 flex items-center gap-2">
@@ -320,15 +375,65 @@ export default function App() {
 
             </div>
 
+            {/* School Query / Feedback Card */}
+            <div className="p-4 bg-gradient-to-r from-blue-50 via-amber-50/50 to-emerald-50 rounded-2xl border border-slate-200 text-xs text-slate-700 mb-5 print:hidden print-hidden">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-amber-100 text-amber-800 rounded-xl shrink-0">
+                    <MessageSquareText className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-extrabold text-slate-900 text-xs sm:text-sm">
+                      किसी भी समस्या या फीडबैक के लिए (For Any Query / Feedback)
+                    </div>
+                    <p className="text-[11.5px] text-slate-600 mt-0.5">
+                      अंकसूची, परिणाम अथवा शुल्क में किसी भी त्रुटि सुधार या जानकारी हेतु फीडबैक भेजें:
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <a
+                    href={MAIN_SCHOOL_WEBSITE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-2 bg-[#1a73e8] hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-all inline-flex items-center gap-1.5"
+                  >
+                    <span>फीडबैक भेजें ↗</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                  <a
+                    href={MAIN_SCHOOL_WEBSITE_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-800 font-bold border border-slate-300 rounded-xl shadow-2xs transition-all inline-flex items-center gap-1.5"
+                  >
+                    <Globe className="w-3.5 h-3.5 text-blue-600" />
+                    <span>मुख्य पृष्ठ ↗</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+
             {/* School Office Help Note */}
-            <div className="text-center p-4 bg-white/70 rounded-2xl border border-slate-200 text-xs text-slate-600">
+            <div className="text-center p-3 bg-white/70 rounded-2xl border border-slate-200 text-xs text-slate-600 print:hidden print-hidden">
               <span>किसी भी सहायता अथवा जानकारी हेतु विद्यालय कार्यालय में संपर्क करें।</span>
             </div>
 
           </div>
 
-          <footer className="text-center text-xs text-slate-500 py-3 mt-4">
-            {SCHOOL_INFO.schoolName} • सत्र {sessionInfo.session}
+          <footer className="text-center text-xs text-slate-500 py-3 mt-4 print:hidden print-hidden">
+            <p className="flex flex-wrap items-center justify-center gap-1.5">
+              <span>{SCHOOL_INFO.schoolName} • सत्र {sessionInfo.session}</span>
+              <span>•</span>
+              <a
+                href={MAIN_SCHOOL_WEBSITE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:underline"
+              >
+                mdhsss.netlify.app ↗
+              </a>
+            </p>
           </footer>
         </div>
       );
@@ -343,6 +448,7 @@ export default function App() {
             onPrint={() => window.print()}
             onLogout={handleLogout}
             onBack={() => setStudentPortalTab('menu')}
+            onViewFees={() => setStudentPortalTab('fees')}
             lastUpdated={lastUpdated}
           />
         ) : (
@@ -385,6 +491,28 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2">
+              <a
+                href={MAIN_SCHOOL_WEBSITE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 font-bold rounded-lg border border-slate-300 shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer"
+                title="मुख्य वेबसाइट"
+              >
+                <Globe className="w-3.5 h-3.5 text-blue-600" />
+                <span>मुख्य वेबसाइट ↗</span>
+              </a>
+
+              <a
+                href={MAIN_SCHOOL_WEBSITE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                title="फीडबैक / Any Query"
+              >
+                <MessageSquareText className="w-3.5 h-3.5 text-amber-700" />
+                <span>फीडबैक पोर्टल ↗</span>
+              </a>
+
               <button
                 type="button"
                 onClick={() => setShowAdminDashboard(true)}
@@ -508,6 +636,7 @@ export default function App() {
               <OfficialReportCard
                 student={currentStudent}
                 onPrint={() => window.print()}
+                onViewFees={() => setAdminStudentTab('fees')}
                 lastUpdated={lastUpdated}
               />
             ) : (

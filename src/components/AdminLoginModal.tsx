@@ -26,7 +26,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
     const u = username.trim();
     const p = password.trim();
 
-    if (u === 'Vivek@' && p === 'Vivek@') {
+    if (u === 'Vivek@' && p === 'Vivek64@') {
       onLoginSuccess();
       onClose();
     } else {

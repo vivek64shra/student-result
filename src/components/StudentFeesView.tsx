@@ -13,10 +13,14 @@ import {
   ShieldCheck,
   Building2,
   ArrowLeft,
-  Info
+  Info,
+  Globe,
+  MessageSquareText,
+  ExternalLink
 } from 'lucide-react';
 import { StudentFeeRecord, formatINR, getAcademicSessionInfo } from '../utils/feesParser';
 import { ParsedStudent, SCHOOL_INFO, SCHOOL_LOGO_URL } from '../utils/reportCardParser';
+import { MAIN_SCHOOL_WEBSITE_URL } from './LoginPage';
 
 interface StudentFeesViewProps {
   student: ParsedStudent;
@@ -76,22 +80,46 @@ export const StudentFeesView: React.FC<StudentFeesViewProps> = ({
     <div id="fee-receipt" className="fee-receipt-container max-w-[1020px] mx-auto">
       
       {/* Top Interactive Bar (Hidden when printing) */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-3 print:hidden">
-        {onBack ? (
-          <button
-            type="button"
-            onClick={onBack}
-            className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-800 font-extrabold text-xs sm:text-sm rounded-xl border border-slate-300 shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-all hover:-translate-x-0.5"
+      <div className="flex flex-wrap items-center justify-between gap-2.5 mb-3 print:hidden print-hidden">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-800 font-extrabold text-xs sm:text-sm rounded-xl border border-slate-300 shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
+            >
+              <ArrowLeft className="w-4 h-4 text-blue-600" />
+              <span>← मुख्य विकल्प</span>
+            </button>
+          )}
+
+          <a
+            href={MAIN_SCHOOL_WEBSITE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            title="किसी भी समस्या या फीस संबंधी प्रश्न के लिए यहाँ क्लिक करें"
           >
-            <ArrowLeft className="w-4 h-4 text-blue-600" />
-            <span>← मुख्य विकल्प (Back to Options)</span>
-          </button>
-        ) : <div />}
+            <MessageSquareText className="w-4 h-4" />
+            <span>फीस संबंधी समस्या / फीडबैक ↗</span>
+          </a>
+
+          <a
+            href={MAIN_SCHOOL_WEBSITE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs sm:text-sm rounded-xl border border-slate-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            title="माँ दुर्गा उ.मा. विद्यालय मुख्य पृष्ठ"
+          >
+            <Globe className="w-4 h-4 text-blue-600" />
+            <span>मुख्य पृष्ठ ↗</span>
+          </a>
+        </div>
 
         <button
           type="button"
           onClick={handlePrint}
-          className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer transform hover:-translate-y-0.5"
+          className="w-full sm:w-auto px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
         >
           <Printer className="w-4 h-4" />
           <span>शुल्क रसीद प्रिंट करें (Print Slip)</span>

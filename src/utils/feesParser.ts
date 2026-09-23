@@ -356,11 +356,31 @@ export function getInitialCachedFees(): StudentFeeRecord[] {
 
 export async function fetchLiveFeesData(): Promise<StudentFeeRecord[]> {
   try {
-    const res = await fetch(FEES_GOOGLE_SHEETS_CSV_URL);
-    if (!res.ok) {
-      throw new Error(`HTTP Error: ${res.status}`);
+    let text: string | null = null;
+    try {
+      const res = await fetch(FEES_GOOGLE_SHEETS_CSV_URL);
+      if (res.ok) {
+        text = await res.text();
+      }
+    } catch (directErr) {
+      console.warn('Direct Google Sheet fees fetch failed, trying proxy endpoint...', directErr);
     }
-    const text = await res.text();
+
+    if (!text) {
+      try {
+        const proxyRes = await fetch('/api/proxy/fees');
+        if (proxyRes.ok) {
+          text = await proxyRes.text();
+        }
+      } catch (proxyErr) {
+        console.warn('Proxy fees fetch failed:', proxyErr);
+      }
+    }
+
+    if (!text) {
+      throw new Error('Unable to retrieve fees from direct or proxy endpoints');
+    }
+
     const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
     if (lines.length <= 1) return getInitialCachedFees();
 
@@ -409,21 +429,23 @@ export async function fetchLiveFeesData(): Promise<StudentFeeRecord[]> {
 
 export function findStudentFeeRecord(
   feeList: StudentFeeRecord[],
-  scholarNo: string,
-  rollNo?: string,
+  scholarNo?: string | number,
+  rollNo?: string | number,
   studentName?: string
 ): StudentFeeRecord | null {
-  const cleanScholar = scholarNo.trim().toLowerCase();
-  const numScholar = parseInt(cleanScholar, 10);
-  const cleanRoll = rollNo ? rollNo.trim().toLowerCase() : '';
-  const numRoll = cleanRoll ? parseInt(cleanRoll, 10) : NaN;
-  const cleanName = studentName ? studentName.trim().toLowerCase() : '';
+  if (!feeList || feeList.length === 0) return null;
+
+  const rawScholar = String(scholarNo ?? '').trim().toLowerCase();
+  const numScholar = rawScholar ? parseInt(rawScholar, 10) : NaN;
+  const rawRoll = String(rollNo ?? '').trim().toLowerCase();
+  const numRoll = rawRoll ? parseInt(rawRoll, 10) : NaN;
+  const cleanName = studentName ? String(studentName).trim().toLowerCase() : '';
 
   // 1. Primary: Match by exact Scholar No (string or numeric comparison)
-  if (cleanScholar) {
+  if (rawScholar) {
     const foundByScholar = feeList.find((f) => {
-      const fScholar = f.scholarNo.toLowerCase().trim();
-      if (fScholar === cleanScholar) return true;
+      const fScholar = String(f.scholarNo ?? '').trim().toLowerCase();
+      if (fScholar === rawScholar) return true;
       if (!isNaN(numScholar) && parseInt(fScholar, 10) === numScholar) return true;
       return false;
     });
@@ -431,10 +453,10 @@ export function findStudentFeeRecord(
   }
 
   // 2. Secondary: Match by roll number if scholar equals roll number in some cases
-  if (cleanRoll) {
+  if (rawRoll) {
     const foundByRoll = feeList.find((f) => {
-      const fScholar = f.scholarNo.toLowerCase().trim();
-      if (fScholar === cleanRoll) return true;
+      const fScholar = String(f.scholarNo ?? '').trim().toLowerCase();
+      if (fScholar === rawRoll) return true;
       if (!isNaN(numRoll) && parseInt(fScholar, 10) === numRoll) return true;
       return false;
     });
@@ -444,7 +466,7 @@ export function findStudentFeeRecord(
   // 3. Fallback: Match by student name
   if (cleanName && cleanName.length >= 4) {
     const foundByName = feeList.find((f) => {
-      const fName = f.studentName.toLowerCase().trim();
+      const fName = String(f.studentName ?? '').trim().toLowerCase();
       return fName.includes(cleanName) || cleanName.includes(fName);
     });
     if (foundByName) return foundByName;

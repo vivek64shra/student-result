@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Search, RefreshCw, Users, Sparkles, Calendar } from 'lucide-react';
+import { Search, RefreshCw, Users, Sparkles, Calendar, Globe, MessageSquareText, ExternalLink } from 'lucide-react';
 import { ParsedStudent } from '../utils/reportCardParser';
+import { MAIN_SCHOOL_WEBSITE_URL } from './LoginPage';
 
 interface StudentSearchAreaProps {
   onSearch: (query: string) => void;
@@ -92,6 +93,28 @@ export const StudentSearchArea: React.FC<StudentSearchAreaProps> = ({
       {/* Quick Links */}
       <div className="mt-4 pt-3 border-t border-slate-200/80 flex flex-wrap items-center justify-center gap-2.5 text-xs text-slate-500">
         <span>विद्यार्थी का स्कॉलर नंबर अथवा रोल नंबर दर्ज करें।</span>
+        <a
+          href={MAIN_SCHOOL_WEBSITE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 font-bold border border-amber-300 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+          title="फीडबैक भेजें"
+        >
+          <MessageSquareText className="w-3.5 h-3.5 text-amber-800" />
+          <span>फीडबैक / Any Query ↗</span>
+        </a>
+
+        <a
+          href={MAIN_SCHOOL_WEBSITE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 font-bold border border-slate-300 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+          title="मुख्य विद्यालय पोर्टल"
+        >
+          <Globe className="w-3.5 h-3.5 text-blue-600" />
+          <span>मुख्य वेबसाइट ↗</span>
+        </a>
+
         <button
           type="button"
           onClick={onOpenDirectory}
