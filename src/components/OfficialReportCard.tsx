@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Printer, 
   School, 
@@ -11,10 +11,13 @@ import {
   Sparkles,
   Globe,
   MessageSquareText,
-  ExternalLink
+  ExternalLink,
+  Download,
+  Image as ImageIcon
 } from 'lucide-react';
 import { ParsedStudent, SCHOOL_INFO, SCHOOL_LOGO_URL, DEFAULT_UPDATE_TIMESTAMP } from '../utils/reportCardParser';
 import { MAIN_SCHOOL_WEBSITE_URL } from './LoginPage';
+import { downloadElementAsJpg } from '../utils/imageExporter';
 
 interface OfficialReportCardProps {
   student: ParsedStudent;
@@ -33,12 +36,22 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
   onViewFees,
   lastUpdated,
 }) => {
+  const [isDownloadingJpg, setIsDownloadingJpg] = useState(false);
+
   const handlePrint = () => {
     if (onPrint) {
       onPrint();
     } else {
       window.print();
     }
+  };
+
+  const handleDownloadJpg = async () => {
+    await downloadElementAsJpg(
+      'marksheet',
+      `Marksheet_${student.scholarNo || student.rollNo || 'Student'}`,
+      setIsDownloadingJpg
+    );
   };
 
   const isExamSectionValid = (section: ParsedStudent['quarterly'] | ParsedStudent['halfYearly'] | ParsedStudent['annual']) => {
@@ -252,27 +265,64 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
 
   return (
     <div className="max-w-[1050px] mx-auto">
-      {/* Top Action Bar for Back & Print */}
-      <div className="flex items-center justify-between gap-3 mb-3 print:hidden">
-        {onBack ? (
+      {/* Top Action Bar for Back, Print, JPG Download, Feedback & Logout (Single non-repeating bar) */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3 print:hidden print-hidden">
+        <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-800 font-extrabold text-xs sm:text-sm rounded-xl border border-slate-300 shadow-xs flex items-center gap-1.5 cursor-pointer transition-all hover:-translate-x-0.5"
+            >
+              <ArrowLeft className="w-4 h-4 text-blue-600" />
+              <span>← मुख्य विकल्प</span>
+            </button>
+          )}
+
+          <a
+            href={MAIN_SCHOOL_WEBSITE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-950 font-bold text-xs sm:text-sm rounded-xl border border-amber-300 shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer"
+            title="किसी भी समस्या या फीडबैक के लिए यहाँ क्लिक करें"
+          >
+            <MessageSquareText className="w-4 h-4 text-amber-700" />
+            <span>फीडबैक ↗</span>
+          </a>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto justify-end">
           <button
             type="button"
-            onClick={onBack}
-            className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-800 font-extrabold text-xs sm:text-sm rounded-xl border border-slate-300 shadow-xs flex items-center gap-2 cursor-pointer transition-all hover:-translate-x-0.5"
+            onClick={handlePrint}
+            className="px-3.5 sm:px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
           >
-            <ArrowLeft className="w-4 h-4 text-blue-600" />
-            <span>← मुख्य विकल्प (Back to Options)</span>
+            <Printer className="w-4 h-4" />
+            <span>प्रिंट अंकसूची</span>
           </button>
-        ) : <div />}
 
-        <button
-          type="button"
-          onClick={handlePrint}
-          className="px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer transform hover:-translate-y-0.5"
-        >
-          <Printer className="w-4 h-4" />
-          <span>अंकसूची प्रिंट करें (Print)</span>
-        </button>
+          <button
+            type="button"
+            onClick={handleDownloadJpg}
+            disabled={isDownloadingJpg}
+            className="px-3.5 sm:px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+            title="अंकसूची को A4 साइज JPG फोटो फॉर्मेट में सीधे मोबाइल में सेव करें"
+          >
+            <Download className="w-4 h-4" />
+            <span>{isDownloadingJpg ? 'JPG बन रहा है...' : 'JPG डाउनलोड (A4)'}</span>
+          </button>
+
+          {onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4 text-red-400" />
+              <span>लॉगआउट</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div
@@ -316,7 +366,7 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
             </div>
 
             <div className="text-[11px] sm:text-xs font-bold text-slate-800 flex flex-wrap items-center justify-center gap-2 sm:gap-6 bg-slate-50 py-1 px-2.5 rounded-lg border border-slate-200 print:bg-transparent print:border-none">
-              <span>डाइसकोड: <b className="font-mono text-slate-900">{SCHOOL_INFO.diceCode}</b></span>
+              <span>डाइस कोड: <b className="font-mono text-slate-900">{SCHOOL_INFO.diceCode}</b></span>
               <span>संस्था कोड: <b className="font-mono text-slate-900">{SCHOOL_INFO.institutionCode}</b></span>
               <span className="text-slate-600">अद्यतन: <b className="text-slate-900">{lastUpdated || DEFAULT_UPDATE_TIMESTAMP}</b></span>
             </div>
@@ -422,66 +472,6 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
                 प्राचार्य / सील
               </div>
             </div>
-          </div>
-        </div>
-
-        {/* Bottom Actions (Hidden during print) */}
-        <div className="mt-4 print:hidden print-hidden relative z-10 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-            {onBack && (
-              <button
-                type="button"
-                onClick={onBack}
-                className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs sm:text-sm rounded-xl border border-slate-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>← मुख्य विकल्प</span>
-              </button>
-            )}
-
-            <a
-              href={MAIN_SCHOOL_WEBSITE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full sm:w-auto px-3.5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              title="किसी भी समस्या या फीडबैक के लिए यहाँ क्लिक करें"
-            >
-              <MessageSquareText className="w-4 h-4" />
-              <span>समस्या / फीडबैक दर्ज करें ↗</span>
-            </a>
-
-            <a
-              href={MAIN_SCHOOL_WEBSITE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full sm:w-auto px-3 py-2.5 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs sm:text-sm rounded-xl border border-slate-300 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              title="माँ दुर्गा उ.मा. विद्यालय मुख्य पृष्ठ"
-            >
-              <Globe className="w-4 h-4 text-blue-600" />
-              <span>मुख्य पृष्ठ ↗</span>
-            </a>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-            <button
-              type="button"
-              onClick={handlePrint}
-              className="w-full sm:w-auto py-2.5 px-5 bg-gradient-to-r from-[#28a745] to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <Printer className="w-4 h-4" />
-              <span>अंकसूची प्रिंट करें (Print)</span>
-            </button>
-
-            {onLogout && (
-              <button
-                type="button"
-                onClick={onLogout}
-                className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <LogOut className="w-4 h-4 text-red-400" />
-                <span>लॉगआउट</span>
-              </button>
-            )}
           </div>
         </div>
       </div>

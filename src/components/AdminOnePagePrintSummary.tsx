@@ -150,7 +150,7 @@ export const AdminOnePagePrintSummary: React.FC<AdminOnePagePrintSummaryProps> =
               </h1>
             </div>
             <p className="text-[11px] font-bold text-slate-700 mt-0.5 print:text-[9.5px]">
-              {SCHOOL_INFO.location} | डाइस कोड: {SCHOOL_INFO.diceCode} | शाला कोड: {SCHOOL_INFO.institutionCode} | सत्र: {SCHOOL_INFO.academicSession}
+              {SCHOOL_INFO.location} | डाइस कोड: {SCHOOL_INFO.diceCode} | संस्था कोड: {SCHOOL_INFO.institutionCode} | सत्र: {SCHOOL_INFO.academicSession}
             </p>
             <div className="inline-block mt-1 px-3 py-0.5 bg-slate-900 text-white font-black text-xs rounded-sm tracking-wide print:text-[10px] print:bg-black">
               परीक्षा परिणाम एवं शैक्षणिक प्रगति सार पत्रक (ACADEMIC PERFORMANCE DIGEST)
