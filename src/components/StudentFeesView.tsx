@@ -17,7 +17,7 @@ import {
   LogOut
 } from 'lucide-react';
 import { StudentFeeRecord, formatINR, getAcademicSessionInfo } from '../utils/feesParser';
-import { ParsedStudent, SCHOOL_INFO, SCHOOL_LOGO_URL } from '../utils/reportCardParser';
+import { ParsedStudent, SCHOOL_INFO, SCHOOL_LOGO_URL, getCurrentPrintTimestamp } from '../utils/reportCardParser';
 import { MAIN_SCHOOL_WEBSITE_URL } from './LoginPage';
 import { downloadElementAsJpg } from '../utils/imageExporter';
 
@@ -206,39 +206,7 @@ export const StudentFeesView: React.FC<StudentFeesViewProps> = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl">
-              {/* Option 1: All Fees */}
-              <button
-                type="button"
-                onClick={() => setFeeOption('all')}
-                className={`px-2.5 py-1.5 sm:py-2 rounded-lg text-xs font-black transition-all cursor-pointer text-center flex flex-col items-center justify-center ${
-                  feeOption === 'all'
-                    ? 'bg-slate-900 text-white shadow-md'
-                    : 'text-slate-700 hover:bg-white/80'
-                }`}
-              >
-                <span>1. सम्पूर्ण शुल्क विवरण</span>
-                <span className="text-[10px] font-mono font-extrabold mt-0.5 opacity-90">
-                  {formatINR(grandTotalAmount)}
-                </span>
-              </button>
-
-              {/* Option 2: Current Session */}
-              <button
-                type="button"
-                onClick={() => setFeeOption('current')}
-                className={`px-2.5 py-1.5 sm:py-2 rounded-lg text-xs font-black transition-all cursor-pointer text-center flex flex-col items-center justify-center ${
-                  feeOption === 'current'
-                    ? 'bg-emerald-700 text-white shadow-md'
-                    : 'text-slate-700 hover:bg-white/80'
-                }`}
-              >
-                <span>2. वर्तमान सत्र ({sessionInfo.session})</span>
-                <span className="text-[10px] font-mono font-extrabold mt-0.5 opacity-90">
-                  {formatINR(currentSessionAmount)}
-                </span>
-              </button>
-
-              {/* Option 3: Previous Year Dues */}
+              {/* Option 1: Previous Year Dues (TOP PRIORITY: Pahle purana bakaya) */}
               <button
                 type="button"
                 onClick={() => setFeeOption('prev_year')}
@@ -257,10 +225,42 @@ export const StudentFeesView: React.FC<StudentFeesViewProps> = ({
                   </span>
                 )}
                 <span className="flex items-center gap-1">
-                  <span>3. गत वर्ष का बकाया</span>
+                  <span>1. गत वर्ष का पुराना बकाया</span>
                 </span>
                 <span className="text-[10px] font-mono font-extrabold mt-0.5">
                   {formatINR(totalOldDues)}
+                </span>
+              </button>
+
+              {/* Option 2: Current Session (Navinikaran & Current Fees) */}
+              <button
+                type="button"
+                onClick={() => setFeeOption('current')}
+                className={`px-2.5 py-1.5 sm:py-2 rounded-lg text-xs font-black transition-all cursor-pointer text-center flex flex-col items-center justify-center ${
+                  feeOption === 'current'
+                    ? 'bg-emerald-700 text-white shadow-md'
+                    : 'text-slate-700 hover:bg-white/80'
+                }`}
+              >
+                <span>2. वार्षिक नवीनीकरण व सत्र ({sessionInfo.session})</span>
+                <span className="text-[10px] font-mono font-extrabold mt-0.5 opacity-90">
+                  {formatINR(currentSessionAmount)}
+                </span>
+              </button>
+
+              {/* Option 3: All Fees */}
+              <button
+                type="button"
+                onClick={() => setFeeOption('all')}
+                className={`px-2.5 py-1.5 sm:py-2 rounded-lg text-xs font-black transition-all cursor-pointer text-center flex flex-col items-center justify-center ${
+                  feeOption === 'all'
+                    ? 'bg-slate-900 text-white shadow-md'
+                    : 'text-slate-700 hover:bg-white/80'
+                }`}
+              >
+                <span>3. सम्पूर्ण कुल शुल्क विवरण</span>
+                <span className="text-[10px] font-mono font-extrabold mt-0.5 opacity-90">
+                  {formatINR(grandTotalAmount)}
                 </span>
               </button>
             </div>
@@ -572,11 +572,20 @@ export const StudentFeesView: React.FC<StudentFeesViewProps> = ({
             </div>
           </div>
 
-          {/* School Stamp Embellishment */}
-          <div className="flex flex-col items-center justify-center opacity-75 print:opacity-100">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 border-dashed border-emerald-800 flex items-center justify-center text-[7px] sm:text-[8px] text-center font-bold text-emerald-900 leading-tight uppercase p-1">
-              Official<br />Seal
+          {/* School Stamp Embellishment with School Logo */}
+          <div className="flex flex-col items-center justify-center select-none" title="माँ दुर्गा उ.मा. विद्यालय - अधिकृत शुल्क मुद्रा">
+            <div className="w-11 h-11 sm:w-13 sm:h-13 rounded-full border-2 border-emerald-900 ring-1 ring-emerald-900/60 p-0.5 flex items-center justify-center bg-emerald-50/50 shadow-2xs print:border-black print:ring-0">
+              <div className="w-full h-full rounded-full border border-dashed border-emerald-700 flex items-center justify-center p-1 bg-white print:border-black">
+                <img
+                  src={SCHOOL_LOGO_URL}
+                  alt="School Logo Stamp"
+                  className="w-full h-full object-contain filter drop-shadow-2xs opacity-95"
+                />
+              </div>
             </div>
+            <span className="text-[7px] sm:text-[8px] font-black text-emerald-950 mt-0.5 tracking-tight uppercase print:text-black">
+              अधिकृत मुद्रा (SEAL)
+            </span>
           </div>
 
           <div className="text-center w-28 sm:w-44">
@@ -584,9 +593,22 @@ export const StudentFeesView: React.FC<StudentFeesViewProps> = ({
               <span className="font-serif italic text-[10px] text-slate-400 print:text-slate-600">Principal</span>
             </div>
             <div className="border-t border-slate-700 pt-1 font-bold text-slate-900 text-[10.5px] sm:text-xs">
-              प्राचार्य हस्ताक्षर / सील
+              प्राचार्य हस्ताक्षर
             </div>
           </div>
+        </div>
+
+        {/* Bottom Print Date & Time Footer (Appears on print & screen) */}
+        <div className="mt-2.5 pt-1 border-t border-slate-200 print:border-black flex items-center justify-between text-[8px] sm:text-[9.5px] text-slate-500 print:text-black font-mono">
+          <span>
+            प्रिंट दिनांक एवं समय: <b>{getCurrentPrintTimestamp()}</b>
+          </span>
+          <span className="hidden sm:inline print:inline font-sans">
+            {SCHOOL_INFO.schoolName} (डाइस: {SCHOOL_INFO.diceCode})
+          </span>
+          <span>
+            अधिकृत शुल्क मांग/रसीद पत्र
+          </span>
         </div>
 
       </div>

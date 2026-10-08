@@ -149,10 +149,31 @@ export function parseRawFeeRecord(raw: Record<string, any>): StudentFeeRecord {
   const grandTotal = rawTotal > 0 ? rawTotal : calculatedTotal;
 
   // Build itemized fee breakdown
-  // REQUIREMENT: "वार्षिक नवीनीकरण शुल्क ko bhi top me likho"
+  // REQUIREMENT: "previous due bale ko pahle rakho 2nd me navinikaran bala kyuki pahle to previous due jama karna padega uske baad new session ki fees lagegi issiliye"
   const items: FeeHeadItem[] = [];
 
-  // 1. TOP: वार्षिक नवीनीकरण शुल्क (Annual Renewal Fee)
+  // 1. TOP 1: गत वर्ष का पुराना बकाया (Previous Year Dues)
+  if (prevYearDue > 0) {
+    items.push({
+      id: 'prev_year_due',
+      nameHindi: 'गत वर्ष का पुराना बकाया',
+      nameEnglish: 'Previous Year Dues',
+      category: 'Dues',
+      amount: prevYearDue,
+    });
+  }
+
+  if (aprilOldDueFee > 0) {
+    items.push({
+      id: 'april_old_due',
+      nameHindi: 'अप्रैल पुराना बकाया शुल्क',
+      nameEnglish: 'April Old Due Fee',
+      category: 'Dues',
+      amount: aprilOldDueFee,
+    });
+  }
+
+  // 2. TOP 2: वार्षिक नवीनीकरण शुल्क (Annual Renewal Fee)
   if (renewableFee > 0) {
     items.push({
       id: 'renewable_fee',
@@ -163,7 +184,7 @@ export function parseRawFeeRecord(raw: Record<string, any>): StudentFeeRecord {
     });
   }
 
-  // 2. नवीन प्रवेश शुल्क (New Admission Fee)
+  // 3. नवीन प्रवेश शुल्क (New Admission Fee)
   if (admissionFee > 0) {
     items.push({
       id: 'admission_fee',
@@ -171,17 +192,6 @@ export function parseRawFeeRecord(raw: Record<string, any>): StudentFeeRecord {
       nameEnglish: 'New Admission Fee',
       category: 'Admission',
       amount: admissionFee,
-    });
-  }
-
-  // 3. गत वर्ष का बकाया (Previous Year Due)
-  if (prevYearDue > 0) {
-    items.push({
-      id: 'prev_year_due',
-      nameHindi: 'गत वर्ष का पुराना बकाया',
-      nameEnglish: 'Previous Year Dues',
-      category: 'Dues',
-      amount: prevYearDue,
     });
   }
 
@@ -280,16 +290,6 @@ export function parseRawFeeRecord(raw: Record<string, any>): StudentFeeRecord {
       nameEnglish: 'December Registration Fee',
       category: 'Other',
       amount: decRegistrationFee,
-    });
-  }
-
-  if (aprilOldDueFee > 0) {
-    items.push({
-      id: 'april_old_due',
-      nameHindi: 'अप्रैल पुराना बकाया शुल्क',
-      nameEnglish: 'April Old Due Fee',
-      category: 'Dues',
-      amount: aprilOldDueFee,
     });
   }
 

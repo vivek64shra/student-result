@@ -12,7 +12,7 @@ import {
   Calendar,
   School
 } from 'lucide-react';
-import { SCHOOL_INFO } from '../utils/reportCardParser';
+import { SCHOOL_INFO, SCHOOL_LOGO_URL, getCurrentPrintTimestamp } from '../utils/reportCardParser';
 
 export interface SubjectStatItem {
   name: string;
@@ -383,7 +383,7 @@ export const AdminOnePagePrintSummary: React.FC<AdminOnePagePrintSummaryProps> =
           </div>
 
           {/* 7. Signatures Block */}
-          <div className="grid grid-cols-3 gap-4 pt-4 mt-2 border-t border-slate-400 text-center text-[10.5px] print:text-[9px] print:pt-3">
+          <div className="grid grid-cols-4 gap-2 pt-4 mt-2 border-t border-slate-400 text-center text-[10.5px] print:text-[9px] print:pt-3 items-end">
             <div>
               <div className="h-6 print:h-5"></div>
               <span className="border-t border-slate-700 pt-1 block font-bold text-slate-900">
@@ -396,16 +396,33 @@ export const AdminOnePagePrintSummary: React.FC<AdminOnePagePrintSummaryProps> =
                 हस्ताक्षर परीक्षा प्रभारी (Exam In-charge)
               </span>
             </div>
+            <div className="flex flex-col items-center justify-center">
+              <div className="w-10 h-10 rounded-full border-2 border-indigo-950 p-0.5 flex items-center justify-center bg-indigo-50/50 print:border-black">
+                <div className="w-full h-full rounded-full border border-dashed border-indigo-700 flex items-center justify-center p-0.5 bg-white print:border-black">
+                  <img src={SCHOOL_LOGO_URL} alt="Seal" className="w-full h-full object-contain" />
+                </div>
+              </div>
+              <span className="text-[7.5px] font-black uppercase text-indigo-950 mt-0.5 print:text-black">अधिकृत सील</span>
+            </div>
             <div>
               <div className="h-6 print:h-5"></div>
               <span className="border-t border-slate-700 pt-1 block font-black text-slate-950">
-                हस्ताक्षर एवं सील संस्था प्राचार्य (Principal)
+                हस्ताक्षर संस्था प्राचार्य (Principal)
               </span>
             </div>
           </div>
 
-          <div className="mt-2 text-center text-[9px] text-slate-400 print:text-[7.5px] print:text-slate-500">
-            * यह पत्रक शाला प्रबंधन एवं शैक्षणिक गुणवत्ता सुधार हेतु अधिकृत रूप से जनरेट किया गया 1-पेज सारांश प्रतिवेदन है।
+          {/* Bottom Print Date & Time Footer */}
+          <div className="mt-2 pt-1 border-t border-slate-300 print:border-black flex items-center justify-between text-[8px] print:text-[7.5px] text-slate-500 print:text-black font-mono">
+            <span>
+              प्रिंट दिनांक एवं समय: <b>{getCurrentPrintTimestamp()}</b>
+            </span>
+            <span>
+              {SCHOOL_INFO.schoolName} (डाइस: {SCHOOL_INFO.diceCode})
+            </span>
+            <span>
+              अधिकृत 1-पेज शाला परीक्षा सारांश प्रतिवेदन
+            </span>
           </div>
 
         </div>

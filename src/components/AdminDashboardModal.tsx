@@ -24,16 +24,21 @@ import {
   Printer,
   Eye,
   EyeOff,
-  Lightbulb
+  Lightbulb,
+  CreditCard
 } from 'lucide-react';
 import { ParsedStudent, SCHOOL_INFO, compareClassNames } from '../utils/reportCardParser';
 import { fetchAiAcademicRecommendations, generateClientDiagnosticAnalysis } from '../utils/aiAdvisor';
 import { AdminOnePagePrintSummary } from './AdminOnePagePrintSummary';
+import { ClassResultSheetModal } from './ClassResultSheetModal';
+import { ClassBulkFeeModal } from './ClassBulkFeeModal';
+import { StudentFeeRecord } from '../utils/feesParser';
 
 interface AdminDashboardModalProps {
   isOpen: boolean;
   onClose: () => void;
   students: ParsedStudent[];
+  fees?: StudentFeeRecord[];
   onSelectStudent: (student: ParsedStudent) => void;
   onLogout: () => void;
   lastUpdated?: string;
@@ -45,6 +50,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   isOpen,
   onClose,
   students,
+  fees,
   onSelectStudent,
   onLogout,
   lastUpdated,
@@ -58,8 +64,10 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [studentStatusFilter, setStudentStatusFilter] = useState<'ALL' | 'FAIL' | 'SUPPL' | 'FIRST'>('ALL');
 
-  // 1-Page Print Summary Modal State
+  // Print Modals State: 1-Page Summary, Class Result Register, Bulk Fees
   const [showPrintSummaryModal, setShowPrintSummaryModal] = useState<boolean>(false);
+  const [showClassResultModal, setShowClassResultModal] = useState<boolean>(false);
+  const [showClassBulkFeeModal, setShowClassBulkFeeModal] = useState<boolean>(false);
 
   // AI Recommendation states (Class-Wise on demand)
   const [aiAnalysis, setAiAnalysis] = useState<string>('');
@@ -68,14 +76,14 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const [isLoadingAi, setIsLoadingAi] = useState<boolean>(false);
   const [hasCopiedAi, setHasCopiedAi] = useState<boolean>(false);
 
-  // 1. Group class list
-  const classList = useMemo(() => {
+  // 1. Group raw class list
+  const allRawClassList = useMemo(() => {
     const set = new Set<string>();
     students.forEach((s) => set.add(s.className || s.sheetName));
     return Array.from(set).sort(compareClassNames);
   }, [students]);
 
-  // 2. Compute aggregate metrics per class
+  // 2. Compute aggregate metrics per class and HIDE classes without result entries
   const classStats = useMemo(() => {
     const statsMap: Record<
       string,
@@ -92,7 +100,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       }
     > = {};
 
-    classList.forEach((cls) => {
+    allRawClassList.forEach((cls) => {
       statsMap[cls] = {
         className: cls,
         sheetName: '',
@@ -155,8 +163,21 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       }
     });
 
-    return Object.values(statsMap);
-  }, [students, classList, selectedExam]);
+    // CRITICAL USER REQUIREMENT: HIDE classes where no result entry exists (appeared === 0)
+    return Object.values(statsMap).filter((st) => st.appeared > 0);
+  }, [students, allRawClassList, selectedExam]);
+
+  // Active class list only includes classes that have actual results
+  const classList = useMemo(() => {
+    return classStats.map((st) => st.className).sort(compareClassNames);
+  }, [classStats]);
+
+  // If selectedClass was pointing to a hidden/empty class, fallback to 'ALL'
+  React.useEffect(() => {
+    if (selectedClass !== 'ALL' && !classList.includes(selectedClass)) {
+      setSelectedClass('ALL');
+    }
+  }, [selectedClass, classList]);
 
   // Overall totals
   const overallMetrics = useMemo(() => {
@@ -469,6 +490,30 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
         />
       )}
 
+      {/* Class Result Sheet & Bulk Marksheets Register Modal */}
+      {showClassResultModal && (
+        <ClassResultSheetModal
+          isOpen={showClassResultModal}
+          onClose={() => setShowClassResultModal(false)}
+          students={students}
+          initialClass={selectedClass !== 'ALL' ? selectedClass : classList[0]}
+          initialExam={selectedExam}
+          lastUpdated={lastUpdated}
+        />
+      )}
+
+      {/* Class Bulk Fee Demand Register & Bulk Slips Modal */}
+      {showClassBulkFeeModal && (
+        <ClassBulkFeeModal
+          isOpen={showClassBulkFeeModal}
+          onClose={() => setShowClassBulkFeeModal(false)}
+          students={students}
+          fees={fees || []}
+          initialClass={selectedClass !== 'ALL' ? selectedClass : classList[0]}
+          lastUpdated={lastUpdated}
+        />
+      )}
+
       <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn print:hidden">
         <div className="bg-slate-50 rounded-2xl shadow-2xl border border-slate-300 w-full max-w-7xl max-h-[96vh] flex flex-col overflow-hidden">
           
@@ -504,16 +549,38 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              {/* Class-wise Result Print / Excel Tabulation Register */}
+              <button
+                type="button"
+                onClick={() => setShowClassResultModal(true)}
+                className="px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-black text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+                title="कक्षावार परीक्षा परिणाम सारणी / लेजर एवं थोक अंकसूची प्रिंट करें"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>📑 कक्षा परिणाम प्रिंट</span>
+              </button>
+
+              {/* Class-wise Bulk Fee Statement / Ledger Print */}
+              <button
+                type="button"
+                onClick={() => setShowClassBulkFeeModal(true)}
+                className="px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+                title="कक्षावार थोक शुल्क मांग रजिस्टर एवं थोक रसीदें प्रिंट करें"
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>💳 थोक शुल्क प्रिंट</span>
+              </button>
+
               {/* 1-Page Print Button - Prominent & Always Accessible */}
               <button
                 type="button"
                 onClick={() => setShowPrintSummaryModal(true)}
-                className="px-3 py-1.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-black text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+                className="px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-black text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
                 title="पूरा परिणाम विश्लेषण 1 पेज में प्रिंट करें"
               >
-                <Printer className="w-4 h-4" />
-                <span>🖨️ 1-पेज सार प्रिंट</span>
+                <Printer className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">1-पेज सार प्रिंट</span>
               </button>
 
               {/* Exam selector */}
@@ -686,11 +753,31 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => setShowPrintSummaryModal(true)}
-                  className="px-3 py-1.5 bg-slate-100 hover:bg-blue-50 text-blue-700 hover:text-blue-800 text-xs font-bold rounded-lg border border-blue-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  onClick={() => setShowClassResultModal(true)}
+                  className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg border border-blue-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  title="कक्षावार परिणाम सारणी एवं थोक अंकसूची प्रिंट करें"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  <span>1-पेज प्रिंट प्रिव्यू</span>
+                  <span>कक्षा परिणाम प्रिंट</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowClassBulkFeeModal(true)}
+                  className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold rounded-lg border border-emerald-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  title="कक्षावार थोक शुल्क मांग रजिस्टर एवं रसीदें प्रिंट करें"
+                >
+                  <CreditCard className="w-3.5 h-3.5" />
+                  <span>थोक शुल्क प्रिंट</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowPrintSummaryModal(true)}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-800 text-xs font-bold rounded-lg border border-slate-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>1-पेज सार प्रिंट</span>
                 </button>
               </div>
             </div>

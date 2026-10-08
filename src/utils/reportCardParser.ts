@@ -68,6 +68,20 @@ export const SCHOOL_INFO: SchoolInfo = {
 
 export const DEFAULT_UPDATE_TIMESTAMP = '22-Sep-2026, 04:30 PM';
 
+export function getCurrentPrintTimestamp(): string {
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const year = now.getFullYear();
+  let hours = now.getHours();
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  const strHours = String(hours).padStart(2, '0');
+  return `${day}/${month}/${year}, ${strHours}:${minutes} ${ampm}`;
+}
+
 export const GOOGLE_SHEETS_PUBHTML_URL =
   'https://docs.google.com/spreadsheets/d/e/2PACX-1vTJACfw2mytnCs_RBtLI4UbW5DKj15umzZJ36XNybQqCLn9wYmkeJKu_M8lTbKEG9-1mNlO3D8R1Kf6/pubhtml';
 

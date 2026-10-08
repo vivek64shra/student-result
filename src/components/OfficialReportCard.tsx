@@ -15,7 +15,13 @@ import {
   Download,
   Image as ImageIcon
 } from 'lucide-react';
-import { ParsedStudent, SCHOOL_INFO, SCHOOL_LOGO_URL, DEFAULT_UPDATE_TIMESTAMP } from '../utils/reportCardParser';
+import { 
+  ParsedStudent, 
+  SCHOOL_INFO, 
+  SCHOOL_LOGO_URL, 
+  DEFAULT_UPDATE_TIMESTAMP,
+  getCurrentPrintTimestamp 
+} from '../utils/reportCardParser';
 import { MAIN_SCHOOL_WEBSITE_URL } from './LoginPage';
 import { downloadElementAsJpg } from '../utils/imageExporter';
 
@@ -458,10 +464,20 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
               </div>
             </div>
 
-            <div className="flex flex-col items-center justify-center opacity-70">
-              <div className="w-11 h-11 sm:w-13 sm:h-13 rounded-full border-2 border-dashed border-indigo-700 flex items-center justify-center text-[7.5px] sm:text-[8.5px] text-center font-bold text-indigo-900 leading-tight uppercase p-1">
-                Official<br />Seal
+            {/* Official Circular School Logo Seal */}
+            <div className="flex flex-col items-center justify-center select-none" title="माँ दुर्गा उ.मा. विद्यालय - अधिकृत सील">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full border-2 border-indigo-900 ring-1 ring-indigo-900/60 p-0.5 flex items-center justify-center bg-indigo-50/50 shadow-2xs print:border-black print:ring-0">
+                <div className="w-full h-full rounded-full border border-dashed border-indigo-700 flex items-center justify-center p-1 bg-white print:border-black">
+                  <img
+                    src={SCHOOL_LOGO_URL}
+                    alt="School Logo Seal"
+                    className="w-full h-full object-contain filter drop-shadow-2xs opacity-95"
+                  />
+                </div>
               </div>
+              <span className="text-[7.5px] sm:text-[8.5px] font-black text-indigo-950 mt-0.5 tracking-tight uppercase print:text-black">
+                अधिकृत सील (SEAL)
+              </span>
             </div>
 
             <div className="text-center w-32 sm:w-44">
@@ -469,9 +485,22 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
                 <span className="font-serif italic text-[10px] text-slate-400">Principal</span>
               </div>
               <div className="border-t border-slate-800 pt-1 font-bold text-slate-900 text-[11px] sm:text-xs">
-                प्राचार्य / सील
+                प्राचार्य हस्ताक्षर
               </div>
             </div>
+          </div>
+
+          {/* Bottom Print Date & Time Footer (Appears on print & screen) */}
+          <div className="mt-2.5 pt-1 border-t border-slate-200 print:border-black flex items-center justify-between text-[8.5px] sm:text-[9.5px] text-slate-500 print:text-black font-mono">
+            <span>
+              प्रिंट दिनांक एवं समय: <b>{getCurrentPrintTimestamp()}</b>
+            </span>
+            <span className="hidden sm:inline print:inline font-sans">
+              {SCHOOL_INFO.schoolName} (डाइस: {SCHOOL_INFO.diceCode})
+            </span>
+            <span>
+              अधिकृत कंप्यूटरीकृत अंकसूची
+            </span>
           </div>
         </div>
       </div>

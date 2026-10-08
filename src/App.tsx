@@ -24,6 +24,8 @@ import { StudentSearchArea } from './components/StudentSearchArea';
 import { AllStudentsDirectoryModal } from './components/AllStudentsDirectoryModal';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { AdminDashboardModal } from './components/AdminDashboardModal';
+import { ClassResultSheetModal } from './components/ClassResultSheetModal';
+import { ClassBulkFeeModal } from './components/ClassBulkFeeModal';
 import { 
   GraduationCap, 
   AlertCircle, 
@@ -35,7 +37,8 @@ import {
   CreditCard,
   Award,
   Globe,
-  MessageSquareText
+  MessageSquareText,
+  Printer
 } from 'lucide-react';
 
 export default function App() {
@@ -65,6 +68,8 @@ export default function App() {
   // Admin Dashboard Modal state
   const [showAdminLogin, setShowAdminLogin] = useState<boolean>(false);
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
+  const [showClassResultModal, setShowClassResultModal] = useState<boolean>(false);
+  const [showClassBulkFeeModal, setShowClassBulkFeeModal] = useState<boolean>(false);
 
   // Synchronize Google Sheets and Fees data
   const syncLiveSheetData = async (
@@ -129,6 +134,14 @@ export default function App() {
       const target = state?.screen;
 
       // 1. Modals priority: if any modal is open, back button simply dismisses modal
+      if (showClassResultModal) {
+        setShowClassResultModal(false);
+        return;
+      }
+      if (showClassBulkFeeModal) {
+        setShowClassBulkFeeModal(false);
+        return;
+      }
       if (showDirectory) {
         setShowDirectory(false);
         return;
@@ -597,7 +610,7 @@ export default function App() {
             <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto mb-5">
               ऊपर दिए गए सर्च बॉक्स में किसी भी कक्षा (LKG से 12वीं तक) के विद्यार्थी का स्कॉलर नंबर अथवा रोल नंबर डालकर <b>परिणाम एवं शुल्क देखें</b>।
             </p>
-            <div className="flex flex-wrap items-center justify-center gap-3">
+            <div className="flex flex-wrap items-center justify-center gap-2.5 sm:gap-3">
               <button
                 type="button"
                 onClick={() => {
@@ -608,10 +621,44 @@ export default function App() {
                     // ignore
                   }
                 }}
-                className="px-5 py-2.5 bg-[#1a73e8] hover:bg-blue-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                className="px-4 sm:px-5 py-2.5 bg-[#1a73e8] hover:bg-blue-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
               >
                 <Users className="w-4 h-4" />
                 <span>सभी {students.length} विद्यार्थी डायरेक्टरी</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowClassResultModal(true);
+                  try {
+                    window.history.pushState({ screen: 'class-result', depth: 2 }, '');
+                  } catch {
+                    // ignore
+                  }
+                }}
+                className="px-4 sm:px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                title="कक्षावार परीक्षा परिणाम सारणी (Excel Ledger) एवं थोक अंकसूची प्रिंट करें"
+              >
+                <Printer className="w-4 h-4 text-white" />
+                <span>📑 कक्षा परिणाम सारणी प्रिंट</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowClassBulkFeeModal(true);
+                  try {
+                    window.history.pushState({ screen: 'bulk-fee', depth: 2 }, '');
+                  } catch {
+                    // ignore
+                  }
+                }}
+                className="px-4 sm:px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                title="कक्षावार थोक शुल्क मांग रजिस्टर एवं थोक रसीदें प्रिंट करें"
+              >
+                <CreditCard className="w-4 h-4 text-white" />
+                <span>💳 कक्षावार थोक शुल्क प्रिंट</span>
               </button>
 
               <button
@@ -624,7 +671,7 @@ export default function App() {
                     // ignore
                   }
                 }}
-                className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                className="px-4 sm:px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
               >
                 <BarChart3 className="w-4 h-4 text-amber-300" />
                 <span>प्रप्रमुख डैशबोर्ड (Graph View)</span>
@@ -664,10 +711,32 @@ export default function App() {
           isOpen={showAdminDashboard}
           onClose={() => setShowAdminDashboard(false)}
           students={students}
+          fees={fees}
           onSelectStudent={(s) => {
             handleAdminSelectStudent(s);
           }}
           onLogout={handleLogout}
+          lastUpdated={lastUpdated}
+        />
+      )}
+
+      {/* Class Result Sheet Modal */}
+      {showClassResultModal && (
+        <ClassResultSheetModal
+          isOpen={showClassResultModal}
+          onClose={() => setShowClassResultModal(false)}
+          students={students}
+          lastUpdated={lastUpdated}
+        />
+      )}
+
+      {/* Class Bulk Fee Modal */}
+      {showClassBulkFeeModal && (
+        <ClassBulkFeeModal
+          isOpen={showClassBulkFeeModal}
+          onClose={() => setShowClassBulkFeeModal(false)}
+          students={students}
+          fees={fees}
           lastUpdated={lastUpdated}
         />
       )}
