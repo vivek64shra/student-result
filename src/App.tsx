@@ -395,9 +395,11 @@ export default function App() {
     ? findStudentFeeRecord(fees, currentStudent.scholarNo, currentStudent.rollNo, currentStudent.name)
     : null;
 
+  const isAnyAdminModalOpen = Boolean(showAdminDashboard || showClassResultModal || showClassBulkFeeModal || showDirectory);
+
   return (
     <div className="min-h-screen bg-[#f0f2f5] p-2.5 sm:p-4 md:p-6 print:p-0 print:bg-white text-slate-900 font-sans">
-      <div className="main-container max-w-[1100px] mx-auto bg-white p-3.5 sm:p-7 rounded-2xl shadow-xl border border-slate-200 print:shadow-none print:border-none print:p-0">
+      <div className={`main-container max-w-[1100px] mx-auto bg-white p-3.5 sm:p-7 rounded-2xl shadow-xl border border-slate-200 print:shadow-none print:border-none print:p-0 ${isAnyAdminModalOpen ? 'print:hidden' : ''}`}>
         
         {/* Official School Header with Admin Status */}
         <div className="school-header text-center border-b-2 sm:border-b-4 border-[#1a73e8] pb-4 mb-5 print:hidden relative">

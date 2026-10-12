@@ -49,17 +49,35 @@ export interface StudentFeeRecord {
   items: FeeHeadItem[];
 }
 
-export function getAcademicSessionInfo(refDate: Date = new Date()): {
+// Cell A1 live metadata extracted directly from Excel/Google Sheet
+let liveSheetReportDateStr: string = '12-Oct-2026';
+let liveSheetFeeReportTitle: string = 'DUE FEE REPORT AS ON 12-Oct-2026';
+
+export function getLiveFeeReportDateStr(): string {
+  return liveSheetReportDateStr;
+}
+
+export function getLiveFeeReportTitle(): string {
+  return liveSheetFeeReportTitle;
+}
+
+export function getAcademicSessionInfo(refDate?: Date | string): {
   session: string;
   reportDateStr: string;
   feeReportTitle: string;
 } {
-  // If July 2026 to June 2027 => 2026-27
-  // If month is July (7) to Dec (12) of year YYYY, session is YYYY-(YYYY+1)
-  // If month is Jan (1) to June (6) of year YYYY, session is (YYYY-1)-YYYY
-  const month = refDate.getMonth() + 1; // 1 to 12
-  const year = refDate.getFullYear();
+  let dateObj: Date = new Date();
+  let explicitDateStr = '';
 
+  if (typeof refDate === 'string' && refDate.trim()) {
+    explicitDateStr = refDate.trim();
+  } else if (refDate instanceof Date) {
+    dateObj = refDate;
+  }
+
+  // Session: 2025-26 or 2026-27 based on current school calendar
+  const month = dateObj.getMonth() + 1; // 1 to 12
+  const year = dateObj.getFullYear();
   let startYear = year;
   let endYear = year + 1;
   if (month < 7) {
@@ -69,14 +87,9 @@ export function getAcademicSessionInfo(refDate: Date = new Date()): {
   const endYearShort = String(endYear).slice(-2);
   const session = `${startYear}-${endYearShort}`;
 
-  const day = String(refDate.getDate()).padStart(2, '0');
-  const monthNames = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-  ];
-  const monthStr = monthNames[refDate.getMonth()];
-  const reportDateStr = `${day}-${monthStr}-${year}`;
-  const feeReportTitle = `DUE FEE REPORT AS ON ${reportDateStr}`;
+  // Exact date from Excel cell A1 as requested by user
+  const reportDateStr = explicitDateStr || liveSheetReportDateStr;
+  const feeReportTitle = liveSheetFeeReportTitle || `DUE FEE REPORT AS ON ${reportDateStr}`;
 
   return { session, reportDateStr, feeReportTitle };
 }
@@ -397,6 +410,19 @@ export async function fetchLiveFeesData(): Promise<StudentFeeRecord[]> {
     if (headerIndex === -1) {
       console.warn('Could not detect fee header row, falling back to cached fees');
       return getInitialCachedFees();
+    }
+
+    // Extract exact Cell A1 text from the top row: "DUE FEE REPORT AS ON <date>"
+    for (let i = 0; i < headerIndex; i++) {
+      const cell0 = lines[i].split(',')[0].replace(/^"+|"+$/g, '').trim();
+      if (cell0.toLowerCase().includes('due fee') || cell0.toLowerCase().includes('as on')) {
+        liveSheetFeeReportTitle = cell0;
+        const match = cell0.match(/as\s+on\s*:?\s*(.+)$/i);
+        if (match && match[1]) {
+          liveSheetReportDateStr = match[1].trim();
+        }
+        break;
+      }
     }
 
     const headers = lines[headerIndex].split(',').map((h) => h.trim());

@@ -14,8 +14,10 @@ import {
   ParsedStudent, 
   SCHOOL_INFO, 
   SCHOOL_LOGO_URL, 
-  getCurrentPrintTimestamp 
+  getCurrentPrintTimestamp,
+  compareClassNames
 } from '../utils/reportCardParser';
+import { downloadElementAsJpg } from '../utils/imageExporter';
 import { 
   StudentFeeRecord, 
   formatINR, 
@@ -45,6 +47,7 @@ export const ClassBulkFeeModal: React.FC<ClassBulkFeeModalProps> = ({
   const [printScale, setPrintScale] = useState<'compact' | 'normal'>('compact');
   const [viewMode, setViewMode] = useState<'ledger' | 'bulk-slips'>('ledger');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'DUE' | 'CLEARED'>('ALL');
+  const [isDownloadingJpg, setIsDownloadingJpg] = useState(false);
 
   const sessionInfo = getAcademicSessionInfo();
 
@@ -58,7 +61,7 @@ export const ClassBulkFeeModal: React.FC<ClassBulkFeeModalProps> = ({
     fees.forEach((f) => {
       if (f.className) set.add(f.className);
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return Array.from(set).sort(compareClassNames);
   }, [students, fees]);
 
   const [selectedClass, setSelectedClass] = useState<string>(() => {
@@ -141,6 +144,14 @@ export const ClassBulkFeeModal: React.FC<ClassBulkFeeModalProps> = ({
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleDownloadJpg = async () => {
+    await downloadElementAsJpg(
+      'class-bulk-fee-container',
+      `Class_${selectedClass}_Bulk_Fees_Ledger_${sessionInfo.session}`,
+      setIsDownloadingJpg
+    );
   };
 
   // CSV Export
@@ -383,6 +394,17 @@ export const ClassBulkFeeModal: React.FC<ClassBulkFeeModalProps> = ({
         <div className="flex items-center gap-2 justify-end">
           <button
             type="button"
+            onClick={handleDownloadJpg}
+            disabled={isDownloadingJpg}
+            className="px-3 py-1.5 bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-700 hover:to-emerald-800 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60"
+            title="कक्षा थोक शुल्क लेजर को A4 JPG फोटो फॉर्मेट में डाउनलोड करें"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>{isDownloadingJpg ? 'JPG बन रहा है...' : 'JPG डाउनलोड (A4)'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleExportCsv}
             className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
             title="Excel / CSV डाउनलोड करें"
@@ -419,7 +441,10 @@ export const ClassBulkFeeModal: React.FC<ClassBulkFeeModalProps> = ({
           /* ========================================================== */
           /* MODE 1: TABULAR CLASS FEE REGISTER (A4 LEDGER)            */
           /* ========================================================== */
-          <div className="printable-sheet-container bg-white text-slate-900 rounded-2xl p-4 sm:p-6 shadow-xl border border-slate-300 max-w-[1350px] mx-auto print:max-w-none print:p-0 print:border-none print:shadow-none">
+          <div 
+            id="class-bulk-fee-container"
+            className="printable-sheet-container bg-white text-slate-900 rounded-2xl p-4 sm:p-6 shadow-xl border border-slate-300 max-w-[1350px] mx-auto print:max-w-none print:p-0 print:border-none print:shadow-none"
+          >
             
             {/* Header: School Branding */}
             <div className="border-b-2 border-slate-900 pb-2 mb-2 text-center">

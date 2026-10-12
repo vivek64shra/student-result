@@ -19,7 +19,7 @@ import {
 import { StudentFeeRecord, formatINR, getAcademicSessionInfo } from '../utils/feesParser';
 import { ParsedStudent, SCHOOL_INFO, SCHOOL_LOGO_URL, getCurrentPrintTimestamp } from '../utils/reportCardParser';
 import { MAIN_SCHOOL_WEBSITE_URL } from './LoginPage';
-import { downloadElementAsJpg } from '../utils/imageExporter';
+import { downloadElementAsJpg, shareElementAsJpg } from '../utils/imageExporter';
 
 interface StudentFeesViewProps {
   student: ParsedStudent;
@@ -40,6 +40,7 @@ export const StudentFeesView: React.FC<StudentFeesViewProps> = ({
 }) => {
   const [feeOption, setFeeOption] = useState<'all' | 'current' | 'prev_year'>('all');
   const [isDownloadingJpg, setIsDownloadingJpg] = useState(false);
+  const [isSharingWhatsApp, setIsSharingWhatsApp] = useState(false);
 
   const handlePrint = () => {
     if (onPrint) {
@@ -89,33 +90,28 @@ export const StudentFeesView: React.FC<StudentFeesViewProps> = ({
     );
   };
 
-  // WhatsApp Share handler
-  const handleWhatsAppShare = () => {
-    const text = `*${SCHOOL_INFO.schoolName}*\n` +
-      `डाइस कोड: ${SCHOOL_INFO.diceCode} | संस्था कोड: ${SCHOOL_INFO.institutionCode}\n` +
+  // WhatsApp Share handler (Shares JPG receipt directly or downloads + opens WhatsApp)
+  const handleWhatsAppShare = async () => {
+    const fileName = `Fee_Receipt_${student.scholarNo || student.rollNo || 'Student'}.jpg`;
+    const shareTitle = `${SCHOOL_INFO.schoolName} - छात्र शुल्क रसीद`;
+    const shareText = 
+      `विद्यार्थी: ${student.name}\n` +
+      `स्कॉलर नं.: ${student.scholarNo} | रोल नं.: ${student.rollNo}\n` +
+      `कक्षा: ${student.className || feeRecord?.className || 'सामान्य'}\n` +
+      `कुल देय शुल्क: ${formatINR(grandTotalAmount)}\n` +
+      (totalOldDues > 0 ? `गत वर्ष का पुराना बकाया: ${formatINR(totalOldDues)}\n` : '') +
+      `वर्तमान सत्र शुल्क: ${formatINR(currentSessionAmount)}\n` +
       `सत्र: ${sessionInfo.session}\n\n` +
-      `*छात्र शुल्क विवरण / रसीद:*\n` +
-      `• विद्यार्थी: *${student.name}*\n` +
-      `• पिता का नाम: ${student.fatherName || '-'}\n` +
-      `• स्कॉलर नं.: ${student.scholarNo} | रोल नं.: ${student.rollNo}\n` +
-      `• कक्षा: ${student.className || feeRecord?.className || 'सामान्य'}\n\n` +
-      `📊 *शुल्क स्थिति:*\n` +
-      `• कुल देय शुल्क: ${formatINR(grandTotalAmount)}\n` +
-      (totalOldDues > 0 ? `• गत वर्ष का पुराना बकाया: ${formatINR(totalOldDues)}\n` : '') +
-      `• वर्तमान सत्र शुल्क: ${formatINR(currentSessionAmount)}\n\n` +
       `${noteFeesMandatory}\n\n` +
-      `पोर्टल लिंक: ${window.location.origin}`;
+      `ऑनलाइन पोर्टल: ${window.location.origin}`;
 
-    try {
-      if (navigator.clipboard) {
-        navigator.clipboard.writeText(text).catch(() => {});
-      }
-    } catch {
-      // ignore
-    }
-
-    const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-    window.open(url, '_blank');
+    await shareElementAsJpg(
+      'fee-receipt-card',
+      fileName,
+      shareTitle,
+      shareText,
+      setIsSharingWhatsApp
+    );
   };
 
   return (
@@ -171,11 +167,12 @@ export const StudentFeesView: React.FC<StudentFeesViewProps> = ({
           <button
             type="button"
             onClick={handleWhatsAppShare}
-            className="px-3.5 py-2 bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-            title="शुल्क विवरण WhatsApp पर भेजें"
+            disabled={isSharingWhatsApp}
+            className="px-3.5 py-2 bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+            title="शुल्क विवरण WhatsApp पर JPG फोटो के रूप में भेजें"
           >
             <Share2 className="w-4 h-4" />
-            <span>WhatsApp शेयर</span>
+            <span>{isSharingWhatsApp ? 'JPG शेयर हो रहा है...' : 'WhatsApp शेयर (JPG)'}</span>
           </button>
 
           {onLogout && (

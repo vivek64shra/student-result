@@ -41,6 +41,8 @@ export interface ExamSectionData {
   result: string;
 }
 
+import { SCHOOL_LOGO_DATA_URL } from './schoolLogoBase64';
+
 export interface ParsedStudent {
   scholarNo: string;
   rollNo: string;
@@ -55,8 +57,16 @@ export interface ParsedStudent {
   rawRow: any[];
 }
 
-export const SCHOOL_LOGO_URL =
-  'https://www.online.edumentsolution.com/ImageHandler.ashx?pTbl=ApplicationConfig&pImgFiled=iLogo1&pTblFiled=nCampusID&pVal=2&pDBName=My2070';
+export const SCHOOL_LOGO_URL = SCHOOL_LOGO_DATA_URL;
+
+export function getLatestActiveExam(students: ParsedStudent[]): 'quarterly' | 'halfYearly' | 'annual' {
+  if (!students || students.length === 0) return 'quarterly';
+  const hasAnnual = students.some((s) => s.annual?.rows && s.annual.rows.length > 0);
+  if (hasAnnual) return 'annual';
+  const hasHalfYearly = students.some((s) => s.halfYearly?.rows && s.halfYearly.rows.length > 0);
+  if (hasHalfYearly) return 'halfYearly';
+  return 'quarterly';
+}
 
 export const SCHOOL_INFO: SchoolInfo = {
   schoolName: 'माँ दुर्गा उच्च. माध्य. विद्यालय सेमरिया, जिला-रीवा (म.प्र.)',

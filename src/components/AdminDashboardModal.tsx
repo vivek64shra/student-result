@@ -27,7 +27,7 @@ import {
   Lightbulb,
   CreditCard
 } from 'lucide-react';
-import { ParsedStudent, SCHOOL_INFO, compareClassNames } from '../utils/reportCardParser';
+import { ParsedStudent, SCHOOL_INFO, compareClassNames, getLatestActiveExam } from '../utils/reportCardParser';
 import { fetchAiAcademicRecommendations, generateClientDiagnosticAnalysis } from '../utils/aiAdvisor';
 import { AdminOnePagePrintSummary } from './AdminOnePagePrintSummary';
 import { ClassResultSheetModal } from './ClassResultSheetModal';
@@ -56,11 +56,12 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   lastUpdated,
 }) => {
   const [selectedClass, setSelectedClass] = useState<string>('ALL');
-  const [selectedExam, setSelectedExam] = useState<'quarterly' | 'halfYearly' | 'annual'>('quarterly');
+  const [selectedExam, setSelectedExam] = useState<'quarterly' | 'halfYearly' | 'annual'>(() => getLatestActiveExam(students));
   const [activeGraphMode, setActiveGraphMode] = useState<GraphViewMode>('class-comparison');
   
-  // Anti-Lag: Student details table is hidden by default
+  // Anti-Lag: Student details table is hidden by default and limited
   const [showStudentRoster, setShowStudentRoster] = useState<boolean>(false);
+  const [rosterLimit, setRosterLimit] = useState<number>(50);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [studentStatusFilter, setStudentStatusFilter] = useState<'ALL' | 'FAIL' | 'SUPPL' | 'FIRST'>('ALL');
 
@@ -341,11 +342,9 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     });
   }, [students, selectedClass, selectedExam, studentStatusFilter, searchTerm, showStudentRoster]);
 
-  // Reset or initialize class-wise AI advice whenever selected class changes
-  useEffect(() => {
-    if (!isOpen) return;
-
-    // Fast baseline diagnostic for the selected class
+  // Fast baseline diagnostic for the selected class (Zero Lag via useMemo)
+  const baselineAiAnalysis = useMemo(() => {
+    if (!isOpen) return '';
     const targetClassName = selectedClass === 'ALL' ? 'सम्पूर्ण विद्यालय' : `कक्षा ${selectedClass}`;
     const classData = {
       className: targetClassName,
@@ -372,10 +371,11 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       })),
     };
 
-    setAiAnalysis(generateClientDiagnosticAnalysis(payload));
-    setAiAnalyzedClass(selectedClass);
-    setAiSource('diagnostic-engine');
+    return generateClientDiagnosticAnalysis(payload);
   }, [isOpen, selectedClass, selectedExam, currentClassSummary, subjectStats, overallMetrics]);
+
+  // Displayed AI text: use live API response if generated for this class, otherwise baseline analysis
+  const displayedAiAnalysis = (aiAnalysis && aiAnalyzedClass === selectedClass) ? aiAnalysis : baselineAiAnalysis;
 
   // On-demand Class-Wise AI Recommendation Request (NO FULL DUMP, ONLY CHOSEN CLASS)
   const handleRequestLiveAiAdvice = async (targetClsOverride?: string) => {
@@ -485,7 +485,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
           currentClassSummary={currentClassSummary}
           classStats={classStats}
           subjectStats={subjectStats}
-          aiAnalysisText={aiAnalysis}
+          aiAnalysisText={displayedAiAnalysis}
           lastUpdated={lastUpdated}
         />
       )}
@@ -1358,7 +1358,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
 
               {/* Formatted AI Insights Output */}
               <div className="bg-slate-950/60 rounded-xl p-4 sm:p-5 border border-white/10 text-xs sm:text-sm leading-relaxed text-indigo-100 whitespace-pre-line font-normal">
-                {aiAnalysis}
+                {displayedAiAnalysis}
               </div>
             </div>
 
@@ -1494,7 +1494,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                             </td>
                           </tr>
                         ) : (
-                          classStudents.map((s, idx) => {
+                          classStudents.slice(0, rosterLimit).map((s, idx) => {
                             const exam = s[selectedExam];
                             const isPass = exam && (
                               String(exam.result).toUpperCase().includes('PASS') ||
@@ -1561,6 +1561,25 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                       </tbody>
                     </table>
                   </div>
+
+                  {classStudents.length > rosterLimit && (
+                    <div className="p-3 bg-slate-50 text-center border-t border-slate-200 flex flex-wrap items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRosterLimit((prev) => prev + 50)}
+                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all cursor-pointer shadow-xs"
+                      >
+                        ⚡ और 50 विद्यार्थी देखें ({Math.min(rosterLimit, classStudents.length)} / {classStudents.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRosterLimit(classStudents.length)}
+                        className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                      >
+                        सभी {classStudents.length} देखें
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

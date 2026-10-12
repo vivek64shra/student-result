@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Printer, 
   X, 
+  Download,
   CheckCircle2, 
   XCircle, 
   AlertTriangle, 
@@ -13,6 +14,7 @@ import {
   School
 } from 'lucide-react';
 import { SCHOOL_INFO, SCHOOL_LOGO_URL, getCurrentPrintTimestamp } from '../utils/reportCardParser';
+import { downloadElementAsJpg } from '../utils/imageExporter';
 
 export interface SubjectStatItem {
   name: string;
@@ -98,14 +100,24 @@ export const AdminOnePagePrintSummary: React.FC<AdminOnePagePrintSummaryProps> =
     : 0;
   const activeAvg = isAll ? overallMetrics.overallAvg : currentClassSummary?.avgPercentage || 0;
 
+  const [isDownloadingJpg, setIsDownloadingJpg] = useState(false);
+
   const handlePrint = () => {
     window.print();
   };
 
+  const handleDownloadJpg = async () => {
+    await downloadElementAsJpg(
+      'admin-one-page-print',
+      `Admin_Academic_Summary_${selectedClass}_${selectedExam}`,
+      setIsDownloadingJpg
+    );
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-sm overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-sm overflow-y-auto print:static print:inset-auto print:p-0 print:bg-white print:overflow-visible">
       {/* Container - on screen it is a modal preview; in print it takes over the full sheet */}
-      <div className="bg-white text-slate-900 rounded-xl shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[96vh] flex flex-col overflow-hidden my-auto print:m-0 print:p-0 print:border-none print:shadow-none print:max-h-none print:w-full print:rounded-none">
+      <div className="bg-white text-slate-900 rounded-xl shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[96vh] flex flex-col overflow-hidden my-auto print:m-0 print:p-0 print:border-none print:shadow-none print:max-h-none print:w-full print:rounded-none print:overflow-visible">
         
         {/* Screen-only top action bar */}
         <div className="p-3 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 print:hidden shrink-0">
@@ -118,6 +130,16 @@ export const AdminOnePagePrintSummary: React.FC<AdminOnePagePrintSummaryProps> =
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleDownloadJpg}
+              disabled={isDownloadingJpg}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm disabled:opacity-60"
+              title="1-पेज परिणाम सार पत्रक को A4 JPG फोटो फॉर्मेट में डाउनलोड करें"
+            >
+              <Download className="w-4 h-4" />
+              <span>{isDownloadingJpg ? 'JPG बन रहा है...' : 'JPG डाउनलोड (A4)'}</span>
+            </button>
             <button
               type="button"
               onClick={handlePrint}
@@ -139,7 +161,10 @@ export const AdminOnePagePrintSummary: React.FC<AdminOnePagePrintSummaryProps> =
         {/* ========================================================================= */}
         {/* STRICT 1-PAGE PRINTABLE DOCUMENT CONTENT                                  */}
         {/* ========================================================================= */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 print:p-2 print:overflow-visible text-slate-900 bg-white admin-print-sheet">
+        <div 
+          id="admin-one-page-print"
+          className="flex-1 overflow-y-auto p-4 sm:p-6 print:p-2 print:overflow-visible text-slate-900 bg-white admin-print-sheet"
+        >
           
           {/* 1. Official Header */}
           <div className="text-center border-b-2 border-slate-900 pb-2 mb-2.5">

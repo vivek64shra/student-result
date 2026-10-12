@@ -16,8 +16,11 @@ import {
   ParsedStudent, 
   SCHOOL_INFO, 
   SCHOOL_LOGO_URL, 
-  getCurrentPrintTimestamp 
+  getCurrentPrintTimestamp,
+  compareClassNames,
+  getLatestActiveExam
 } from '../utils/reportCardParser';
+import { downloadElementAsJpg } from '../utils/imageExporter';
 import { OfficialReportCard } from './OfficialReportCard';
 
 interface ClassResultSheetModalProps {
@@ -34,29 +37,61 @@ export const ClassResultSheetModal: React.FC<ClassResultSheetModalProps> = ({
   onClose,
   students,
   initialClass = 'ALL',
-  initialExam = 'annual',
+  initialExam,
   lastUpdated,
 }) => {
-  const [selectedExam, setSelectedExam] = useState<'quarterly' | 'halfYearly' | 'annual'>(initialExam);
+  // Determine default exam: pick the exam that has actual marks
+  const activeExamDefault = useMemo(() => {
+    if (initialExam && ['quarterly', 'halfYearly', 'annual'].includes(initialExam)) {
+      const hasSpecified = students.some((s) => s[initialExam]?.rows && s[initialExam]!.rows.length > 0);
+      if (hasSpecified) return initialExam;
+    }
+    return getLatestActiveExam(students);
+  }, [students, initialExam]);
+
+  const [selectedExam, setSelectedExam] = useState<'quarterly' | 'halfYearly' | 'annual'>(activeExamDefault);
   const [printOrientation, setPrintOrientation] = useState<'landscape' | 'portrait'>('landscape');
   const [printScale, setPrintScale] = useState<'compact' | 'normal' | 'spacious'>('compact');
   const [viewMode, setViewMode] = useState<'ledger' | 'bulk-cards'>('ledger');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PASS' | 'FAIL' | 'SUPPL' | 'FIRST'>('ALL');
+  const [isDownloadingJpg, setIsDownloadingJpg] = useState(false);
+
+  // Sync selectedExam if data updates
+  React.useEffect(() => {
+    if (activeExamDefault && selectedExam !== activeExamDefault) {
+      const currentHasAny = students.some((s) => s[selectedExam]?.rows && s[selectedExam]!.rows.length > 0);
+      if (!currentHasAny) {
+        setSelectedExam(activeExamDefault);
+      }
+    }
+  }, [activeExamDefault, selectedExam, students]);
 
   // Compute available classes that actually have results for the selected exam
   const availableClasses = useMemo(() => {
     const classCountMap: Record<string, number> = {};
     students.forEach((s) => {
       const cls = s.className || s.sheetName;
+      if (!cls) return;
       const examData = s[selectedExam];
       if (examData && examData.rows && examData.rows.length > 0) {
         classCountMap[cls] = (classCountMap[cls] || 0) + 1;
       }
     });
 
-    return Object.keys(classCountMap)
+    const list = Object.keys(classCountMap)
       .filter((cls) => classCountMap[cls] > 0)
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      .sort(compareClassNames);
+
+    if (list.length === 0) {
+      const allClassesSet = new Set<string>();
+      students.forEach((s) => {
+        const c = s.className || s.sheetName;
+        if (c) allClassesSet.add(c);
+      });
+      return Array.from(allClassesSet).sort(compareClassNames);
+    }
+
+    return list;
   }, [students, selectedExam]);
 
   const [selectedClass, setSelectedClass] = useState<string>(() => {
@@ -184,6 +219,14 @@ export const ClassResultSheetModal: React.FC<ClassResultSheetModalProps> = ({
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleDownloadJpg = async () => {
+    await downloadElementAsJpg(
+      'class-result-sheet-container',
+      `Class_${selectedClass}_Result_${selectedExam}_Register`,
+      setIsDownloadingJpg
+    );
   };
 
   // Export class ledger to CSV / Excel
@@ -455,6 +498,17 @@ export const ClassResultSheetModal: React.FC<ClassResultSheetModalProps> = ({
         <div className="flex items-center gap-2 justify-end">
           <button
             type="button"
+            onClick={handleDownloadJpg}
+            disabled={isDownloadingJpg}
+            className="px-3 py-1.5 bg-gradient-to-r from-teal-600 to-emerald-700 hover:from-teal-700 hover:to-emerald-800 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60"
+            title="कक्षा परिणाम सारणी को A4 JPG फोटो फॉर्मेट में डाउनलोड करें"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>{isDownloadingJpg ? 'JPG बन रहा है...' : 'JPG डाउनलोड (A4)'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleExportCsv}
             className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
             title="कक्षा का परिणाम Excel / CSV फॉर्मेट में डाउनलोड करें"
@@ -491,7 +545,10 @@ export const ClassResultSheetModal: React.FC<ClassResultSheetModalProps> = ({
           /* ========================================================== */
           /* MODE 1: TABULAR CLASS RESULT REGISTER (EXCEL LEDGER SHEET) */
           /* ========================================================== */
-          <div className="printable-sheet-container bg-white text-slate-900 rounded-2xl p-4 sm:p-6 shadow-xl border border-slate-300 max-w-[1400px] mx-auto print:max-w-none print:p-0 print:border-none print:shadow-none">
+          <div 
+            id="class-result-sheet-container"
+            className="printable-sheet-container bg-white text-slate-900 rounded-2xl p-4 sm:p-6 shadow-xl border border-slate-300 max-w-[1400px] mx-auto print:max-w-none print:p-0 print:border-none print:shadow-none"
+          >
             
             {/* Header: School Branding */}
             <div className="border-b-2 border-slate-900 pb-2 mb-2 text-center">
