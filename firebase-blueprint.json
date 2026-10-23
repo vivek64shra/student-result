@@ -1,0 +1,82 @@
+{
+  "entities": {
+    "DailyAttendanceRecord": {
+      "title": "DailyAttendanceRecord",
+      "description": "Daily class attendance record with list of absent students",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique record ID, typically date_className"
+        },
+        "date": {
+          "type": "string",
+          "description": "Date of attendance in YYYY-MM-DD"
+        },
+        "className": {
+          "type": "string",
+          "description": "Class name for the attendance session"
+        },
+        "teacherName": {
+          "type": "string",
+          "description": "Name of the teacher who took attendance"
+        },
+        "status": {
+          "type": "string",
+          "description": "Attendance status e.g. TAKEN"
+        },
+        "absentCount": {
+          "type": "number",
+          "description": "Number of absent students"
+        },
+        "totalStudents": {
+          "type": "number",
+          "description": "Total students in class"
+        },
+        "absentScholarNos": {
+          "type": "array",
+          "description": "Array of scholar numbers who were marked absent"
+        },
+        "absents": {
+          "type": "array",
+          "description": "List of absent student details (scholarNo, name, fatherName)"
+        }
+      },
+      "required": ["date", "className", "absentScholarNos"]
+    },
+    "StudentAttendanceSummary": {
+      "title": "StudentAttendanceSummary",
+      "description": "Compiled student absence log for academic session 2026-27",
+      "type": "object",
+      "properties": {
+        "scholarNo": {
+          "type": "string",
+          "description": "Scholar number of student"
+        },
+        "session": {
+          "type": "string",
+          "description": "Academic session"
+        },
+        "totalAbsentDays": {
+          "type": "number",
+          "description": "Total number of absent days"
+        },
+        "absentDates": {
+          "type": "array",
+          "description": "Detailed list of dates the student was absent"
+        }
+      },
+      "required": ["scholarNo", "session", "totalAbsentDays", "absentDates"]
+    }
+  },
+  "firestore": {
+    "/attendance_records/{recordId}": {
+      "schema": "DailyAttendanceRecord",
+      "description": "Collection storing daily class attendance logs with absent scholar numbers"
+    },
+    "/attendance/{scholarNo}": {
+      "schema": "StudentAttendanceSummary",
+      "description": "Compiled student attendance records indexed by scholar number"
+    }
+  }
+}

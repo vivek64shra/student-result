@@ -25,13 +25,15 @@ import {
   Eye,
   EyeOff,
   Lightbulb,
-  CreditCard
+  CreditCard,
+  Code2
 } from 'lucide-react';
 import { ParsedStudent, SCHOOL_INFO, compareClassNames, getLatestActiveExam } from '../utils/reportCardParser';
 import { fetchAiAcademicRecommendations, generateClientDiagnosticAnalysis } from '../utils/aiAdvisor';
 import { AdminOnePagePrintSummary } from './AdminOnePagePrintSummary';
 import { ClassResultSheetModal } from './ClassResultSheetModal';
 import { ClassBulkFeeModal } from './ClassBulkFeeModal';
+import { PublishAndEmbedModal } from './PublishAndEmbedModal';
 import { StudentFeeRecord } from '../utils/feesParser';
 
 interface AdminDashboardModalProps {
@@ -69,6 +71,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const [showPrintSummaryModal, setShowPrintSummaryModal] = useState<boolean>(false);
   const [showClassResultModal, setShowClassResultModal] = useState<boolean>(false);
   const [showClassBulkFeeModal, setShowClassBulkFeeModal] = useState<boolean>(false);
+  const [showPublishModal, setShowPublishModal] = useState<boolean>(false);
 
   // AI Recommendation states (Class-Wise on demand)
   const [aiAnalysis, setAiAnalysis] = useState<string>('');
@@ -514,6 +517,14 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
         />
       )}
 
+      {/* Integration & Publish Modal */}
+      {showPublishModal && (
+        <PublishAndEmbedModal
+          isOpen={showPublishModal}
+          onClose={() => setShowPublishModal(false)}
+        />
+      )}
+
       <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn print:hidden">
         <div className="bg-slate-50 rounded-2xl shadow-2xl border border-slate-300 w-full max-w-7xl max-h-[96vh] flex flex-col overflow-hidden">
           
@@ -581,6 +592,17 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">1-पेज सार प्रिंट</span>
+              </button>
+
+              {/* Integration, Google Sheets Links & Public API Modal Button */}
+              <button
+                type="button"
+                onClick={() => setShowPublishModal(true)}
+                className="px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-700 hover:from-purple-700 hover:to-indigo-800 text-white font-black text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+                title="Google Sheets लिंक एवं अन्य ऐप्स / वेबसाइट में रिजल्ट पब्लिश करने के लिंक देखें"
+              >
+                <Code2 className="w-3.5 h-3.5" />
+                <span>🔗 पब्लिश एवं Sheets लिंक</span>
               </button>
 
               {/* Exam selector */}

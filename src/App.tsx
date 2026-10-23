@@ -20,12 +20,19 @@ import { LoginPage, MAIN_SCHOOL_WEBSITE_URL } from './components/LoginPage';
 import { OfficialReportCard } from './components/OfficialReportCard';
 import { StudentFeesView } from './components/StudentFeesView';
 import { StudentPortalChoiceView } from './components/StudentPortalChoiceView';
+import { StudentAttendanceView } from './components/StudentAttendanceView';
 import { StudentSearchArea } from './components/StudentSearchArea';
 import { AllStudentsDirectoryModal } from './components/AllStudentsDirectoryModal';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { AdminDashboardModal } from './components/AdminDashboardModal';
 import { ClassResultSheetModal } from './components/ClassResultSheetModal';
 import { ClassBulkFeeModal } from './components/ClassBulkFeeModal';
+import { PublishAndEmbedModal } from './components/PublishAndEmbedModal';
+import { 
+  saveStudentSession, 
+  getStoredStudentSession, 
+  clearStudentSession 
+} from './utils/studentSession';
 import { 
   GraduationCap, 
   AlertCircle, 
@@ -38,7 +45,9 @@ import {
   Award,
   Globe,
   MessageSquareText,
-  Printer
+  Printer,
+  CalendarCheck,
+  Code2
 } from 'lucide-react';
 
 export default function App() {
@@ -51,16 +60,71 @@ export default function App() {
     return getInitialCachedFees();
   });
   
+  // Embed Mode (?embed=true) for publishing in other websites, WordPress, or mobile WebViews
+  const [isEmbedMode, setIsEmbedMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const p = new URLSearchParams(window.location.search);
+    return p.get('embed') === 'true' || p.get('isEmbed') === '1' || window.location.hash.includes('embed=true');
+  });
+
+  // Persistent student session restoration (Keeps student logged in for 30 days without re-login)
+  const [loggedInStudent, setLoggedInStudent] = useState<ParsedStudent | null>(() => {
+    const session = getStoredStudentSession();
+    if (session) {
+      const initialList = getInitialCachedStudents().students;
+      const cleanSch = session.scholarNo.toLowerCase().trim();
+      const cleanRoll = session.rollNo.toLowerCase().trim();
+      const numScholar = parseInt(cleanSch.replace(/\D/g, ''), 10);
+      const numRoll = parseInt(cleanRoll.replace(/\D/g, ''), 10);
+
+      const found = initialList.find((s) => {
+        const sSch = String(s.scholarNo || '').trim().toLowerCase();
+        const sRoll = String(s.rollNo || '').trim().toLowerCase();
+        const sNumSch = parseInt(sSch.replace(/\D/g, ''), 10);
+        const sNumRoll = parseInt(sRoll.replace(/\D/g, ''), 10);
+        const schMatch = sSch === cleanSch || (!isNaN(numScholar) && sNumSch === numScholar);
+        const rollMatch = sRoll === cleanRoll || (!isNaN(numRoll) && sNumRoll === numRoll);
+        return schMatch && rollMatch;
+      });
+
+      if (found) return found;
+
+      return {
+        scholarNo: session.scholarNo,
+        rollNo: session.rollNo,
+        name: session.name || `विद्यार्थी (${session.scholarNo})`,
+        fatherName: session.fatherName || '',
+        mobile: '',
+        className: session.className || 'सामान्य',
+        sheetName: '',
+        quarterly: null,
+        halfYearly: null,
+        annual: null,
+        rawRow: [],
+      };
+    }
+    return null;
+  });
+
   // Auth state: 'unauthenticated' | 'student' | 'admin'
-  const [authMode, setAuthMode] = useState<'unauthenticated' | 'student' | 'admin'>('unauthenticated');
-  const [loggedInStudent, setLoggedInStudent] = useState<ParsedStudent | null>(null);
+  const [authMode, setAuthMode] = useState<'unauthenticated' | 'student' | 'admin'>(() => {
+    const session = getStoredStudentSession();
+    return session ? 'student' : 'unauthenticated';
+  });
   
-  // Student Portal Navigation: 'menu' (first choice) | 'result' | 'fees'
-  const [studentPortalTab, setStudentPortalTab] = useState<'menu' | 'result' | 'fees'>('menu');
+  // Student Portal Navigation: 'menu' (first choice) | 'result' | 'fees' | 'attendance'
+  const [studentPortalTab, setStudentPortalTab] = useState<'menu' | 'result' | 'fees' | 'attendance'>(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      const v = p.get('view') || p.get('tab');
+      if (v === 'result' || v === 'fees' || v === 'attendance') return v;
+    }
+    return 'menu';
+  });
 
   // Admin search state
-  const [currentStudent, setCurrentStudent] = useState<ParsedStudent | null>(null);
-  const [adminStudentTab, setAdminStudentTab] = useState<'result' | 'fees'>('result');
+  const [currentStudent, setCurrentStudent] = useState<ParsedStudent | null>(() => loggedInStudent);
+  const [adminStudentTab, setAdminStudentTab] = useState<'result' | 'fees' | 'attendance'>('result');
   const [lastUpdated, setLastUpdated] = useState<string>(DEFAULT_UPDATE_TIMESTAMP);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showDirectory, setShowDirectory] = useState<boolean>(false);
@@ -70,6 +134,7 @@ export default function App() {
   const [showAdminDashboard, setShowAdminDashboard] = useState<boolean>(false);
   const [showClassResultModal, setShowClassResultModal] = useState<boolean>(false);
   const [showClassBulkFeeModal, setShowClassBulkFeeModal] = useState<boolean>(false);
+  const [showPublishModal, setShowPublishModal] = useState<boolean>(false);
 
   // Synchronize Google Sheets and Fees data
   const syncLiveSheetData = async (
@@ -119,6 +184,128 @@ export default function App() {
   }, []);
 
   // -------------------------------------------------------------
+  // AUTOMATIC SCHOLAR & ATTENDANCE SYNC FROM DIRECT LINK / IFRAME EMBED
+  // -------------------------------------------------------------
+  const checkUrlAndSyncScholar = useCallback((studentList: ParsedStudent[]) => {
+    if (!studentList || studentList.length === 0) return;
+
+    try {
+      let scholarParam = '';
+      let rollParam = '';
+      let viewParam: 'menu' | 'result' | 'fees' | 'attendance' = 'menu';
+
+      // 1. Check window.location.search (?scholar=2480&roll=12&view=attendance)
+      const searchParams = new URLSearchParams(window.location.search);
+      if (searchParams.get('scholar')) scholarParam = searchParams.get('scholar')!;
+      else if (searchParams.get('scholarNo')) scholarParam = searchParams.get('scholarNo')!;
+      else if (searchParams.get('id')) scholarParam = searchParams.get('id')!;
+
+      if (searchParams.get('roll')) rollParam = searchParams.get('roll')!;
+      else if (searchParams.get('rollNo')) rollParam = searchParams.get('rollNo')!;
+      else if (searchParams.get('pwd')) rollParam = searchParams.get('pwd')!;
+
+      const sView = searchParams.get('view') || searchParams.get('tab');
+      if (sView === 'attendance' || sView === 'fees' || sView === 'result') {
+        viewParam = sView;
+      }
+
+      // 2. Check window.location.hash (#/student-portal?scholar=2480&roll=12&view=attendance)
+      const hash = window.location.hash || '';
+      let hashParams: URLSearchParams | null = null;
+      if (hash.includes('?')) {
+        const queryPart = hash.split('?')[1];
+        hashParams = new URLSearchParams(queryPart);
+        if (hashParams.get('scholar')) scholarParam = hashParams.get('scholar')!;
+        else if (hashParams.get('scholarNo')) scholarParam = hashParams.get('scholarNo')!;
+        else if (hashParams.get('id')) scholarParam = hashParams.get('id')!;
+
+        if (hashParams.get('roll')) rollParam = hashParams.get('roll')!;
+        else if (hashParams.get('rollNo')) rollParam = hashParams.get('rollNo')!;
+        else if (hashParams.get('pwd')) rollParam = hashParams.get('pwd')!;
+
+        const hView = hashParams.get('view') || hashParams.get('tab');
+        if (hView === 'attendance' || hView === 'fees' || hView === 'result') {
+          viewParam = hView;
+        }
+      }
+
+      // Check if embed mode is requested
+      if (
+        searchParams.get('embed') === 'true' || 
+        (hashParams && hashParams.get('embed') === 'true') || 
+        searchParams.get('isEmbed') === '1'
+      ) {
+        setIsEmbedMode(true);
+      }
+
+      // Secure direct sync: only authenticate if BOTH Scholar Number (User ID) and Roll Number (Password) are provided
+      if (scholarParam && rollParam) {
+        const cleanScholar = scholarParam.trim().toLowerCase();
+        const cleanRoll = rollParam.trim().toLowerCase();
+        const numScholar = parseInt(cleanScholar.replace(/\D/g, ''), 10);
+        const numRoll = parseInt(cleanRoll.replace(/\D/g, ''), 10);
+
+        const matched = studentList.find((s) => {
+          const sSch = String(s.scholarNo || '').trim().toLowerCase();
+          const sRoll = String(s.rollNo || '').trim().toLowerCase();
+          const sNumSch = parseInt(sSch.replace(/\D/g, ''), 10);
+          const sNumRoll = parseInt(sRoll.replace(/\D/g, ''), 10);
+
+          const schMatch = sSch === cleanScholar || (!isNaN(numScholar) && sNumSch === numScholar);
+          const rollMatch = sRoll === cleanRoll || (!isNaN(numRoll) && sNumRoll === numRoll);
+          return schMatch && rollMatch;
+        });
+
+        if (matched) {
+          saveStudentSession(matched);
+          setLoggedInStudent(matched);
+          setCurrentStudent(matched);
+          setAuthMode('student');
+          setStudentPortalTab(viewParam);
+        } else {
+          // Direct sync for attendance iframe/links: verify against Firestore
+          import('./utils/firebase').then(({ getStudentAttendanceFromFirestore }) => {
+            getStudentAttendanceFromFirestore(cleanScholar).then((att) => {
+              if (att) {
+                const attRoll = String(att.rollNo || '').trim().toLowerCase();
+                if (attRoll && attRoll !== cleanRoll) {
+                  return; // Don't authenticate if roll number doesn't match
+                }
+                const fallbackStudent: ParsedStudent = {
+                  scholarNo: att?.scholarNo || cleanScholar,
+                  rollNo: att?.rollNo || cleanRoll,
+                  name: att?.studentName || `विद्यार्थी (स्कॉलर: ${cleanScholar})`,
+                  fatherName: 'अभिभावक',
+                  mobile: '',
+                  className: att?.className || 'सामान्य',
+                  sheetName: 'Attendance',
+                  quarterly: null,
+                  halfYearly: null,
+                  annual: null,
+                  rawRow: [],
+                };
+                setLoggedInStudent(fallbackStudent);
+                setCurrentStudent(fallbackStudent);
+                setAuthMode('student');
+                setStudentPortalTab(viewParam);
+              }
+            });
+          }).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('URL auto sync failed:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkUrlAndSyncScholar(students);
+    const handleHash = () => checkUrlAndSyncScholar(students);
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, [students, checkUrlAndSyncScholar]);
+
+  // -------------------------------------------------------------
   // BROWSER & MOBILE BACK BUTTON HANDLER (Fix website closing on back)
   // -------------------------------------------------------------
   const isNavigatingRef = useRef(false);
@@ -157,8 +344,8 @@ export default function App() {
 
       // 2. Student Portal Navigation:
       if (authMode === 'student') {
-        if (studentPortalTab === 'result' || studentPortalTab === 'fees') {
-          // Going back from Result or Fees goes back to 2-Options Menu!
+        if (studentPortalTab === 'result' || studentPortalTab === 'fees' || studentPortalTab === 'attendance') {
+          // Going back from Result, Fees or Attendance goes back to Choice Menu!
           setStudentPortalTab('menu');
           return;
         }
@@ -225,6 +412,7 @@ export default function App() {
   }, [authMode, studentPortalTab, currentStudent]);
 
   const handleLogout = useCallback(() => {
+    clearStudentSession();
     setAuthMode('unauthenticated');
     setLoggedInStudent(null);
     setCurrentStudent(null);
@@ -240,10 +428,11 @@ export default function App() {
   }, []);
 
   const handleStudentLoginSuccess = async (student: ParsedStudent) => {
+    saveStudentSession(student);
     setLoggedInStudent(student);
     setCurrentStudent(student);
     setAuthMode('student');
-    setStudentPortalTab('menu'); // Always show the 2 options screen first!
+    setStudentPortalTab('menu'); // Always show the options screen first!
     
     try {
       window.history.pushState({ screen: 'student-menu', depth: 1 }, '');
@@ -255,7 +444,7 @@ export default function App() {
     syncLiveSheetData(student);
   };
 
-  const handleSelectStudentOption = (option: 'result' | 'fees') => {
+  const handleSelectStudentOption = (option: 'result' | 'fees' | 'attendance') => {
     setStudentPortalTab(option);
     try {
       window.history.pushState({ screen: `student-${option}`, depth: 2 }, '');
@@ -292,7 +481,7 @@ export default function App() {
     const cleanId = queryId.trim().toLowerCase();
 
     if (!cleanId) {
-      alert('कृपया स्कॉलर नंबर अथवा रोल नंबर दर्ज करें!');
+      setErrorMessage('कृपया स्कॉलर नंबर अथवा रोल नंबर दर्ज करें!');
       return;
     }
 
@@ -337,7 +526,7 @@ export default function App() {
   }
 
   // ==========================================
-  // VIEW 2: STUDENT PORTAL (2 Options Screen & Views)
+  // VIEW 2: STUDENT PORTAL (3 Options Screen & Views)
   // ==========================================
   if (authMode === 'student' && loggedInStudent) {
     const studentFeeRecord = findStudentFeeRecord(
@@ -349,7 +538,7 @@ export default function App() {
     const sessionInfo = getAcademicSessionInfo();
     const studentHasResult = hasStudentAnyExamData(loggedInStudent);
 
-    // SUB-VIEW 2A: The 2 Options Choice Menu (Shown right after login)
+    // SUB-VIEW 2A: The 3 Options Choice Menu (Shown right after login)
     if (studentPortalTab === 'menu') {
       return (
         <StudentPortalChoiceView
@@ -362,25 +551,32 @@ export default function App() {
       );
     }
 
-    // SUB-VIEW 2B: Result or Fees View (with Back to Menu option)
+    // SUB-VIEW 2B: Result, Fees, or Attendance View (with Back to Menu option or Clean Embed)
     return (
-      <div className="min-h-screen bg-[#f1f4f9] p-2 sm:p-4 md:p-6 print:p-0 print:bg-white text-slate-900 font-sans">
+      <div className={`min-h-screen ${isEmbedMode ? 'bg-white p-1 sm:p-2' : 'bg-[#f1f4f9] p-2 sm:p-4 md:p-6'} print:p-0 print:bg-white text-slate-900 font-sans`}>
         {studentPortalTab === 'result' ? (
           <OfficialReportCard
             student={loggedInStudent}
             onPrint={() => window.print()}
-            onLogout={handleLogout}
-            onBack={handleAppBack}
-            onViewFees={() => handleSelectStudentOption('fees')}
+            onLogout={isEmbedMode ? undefined : handleLogout}
+            onBack={isEmbedMode ? undefined : handleAppBack}
+            onViewFees={isEmbedMode ? undefined : () => handleSelectStudentOption('fees')}
             lastUpdated={lastUpdated}
           />
-        ) : (
+        ) : studentPortalTab === 'fees' ? (
           <StudentFeesView
             student={loggedInStudent}
             feeRecord={studentFeeRecord}
             onPrint={() => window.print()}
-            onBack={handleAppBack}
-            onLogout={handleLogout}
+            onBack={isEmbedMode ? undefined : handleAppBack}
+            onLogout={isEmbedMode ? undefined : handleLogout}
+            lastUpdated={lastUpdated}
+          />
+        ) : (
+          <StudentAttendanceView
+            student={loggedInStudent}
+            onBack={isEmbedMode ? undefined : handleAppBack}
+            onLogout={isEmbedMode ? undefined : handleLogout}
             lastUpdated={lastUpdated}
           />
         )}
@@ -453,6 +649,16 @@ export default function App() {
               >
                 <BarChart3 className="w-3.5 h-3.5" />
                 <span>प्रप्रमुख डैशबोर्ड (Graph View)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowPublishModal(true)}
+                className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-300 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Google Sheets लिंक एवं अन्य ऐप्स में रिजल्ट पब्लिश लिंक"
+              >
+                <Code2 className="w-3.5 h-3.5 text-purple-700" />
+                <span>🔗 पब्लिश एवं Sheets लिंक</span>
               </button>
 
               <button
@@ -555,11 +761,11 @@ export default function App() {
         {currentStudent ? (
           <div>
             <div className="flex items-center justify-end gap-2 mb-3 print:hidden">
-              <div className="p-1 bg-slate-200 rounded-xl flex gap-1 border border-slate-300">
+              <div className="p-1 bg-slate-200 rounded-xl flex flex-wrap gap-1 border border-slate-300">
                 <button
                   type="button"
                   onClick={() => setAdminStudentTab('result')}
-                  className={`px-4 py-2 rounded-lg font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer ${
+                  className={`px-3.5 py-1.5 sm:py-2 rounded-lg font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer ${
                     adminStudentTab === 'result'
                       ? 'bg-blue-600 text-white shadow-xs'
                       : 'text-slate-700 hover:text-slate-950'
@@ -571,7 +777,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAdminStudentTab('fees')}
-                  className={`px-4 py-2 rounded-lg font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer ${
+                  className={`px-3.5 py-1.5 sm:py-2 rounded-lg font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer ${
                     adminStudentTab === 'fees'
                       ? 'bg-emerald-600 text-white shadow-xs'
                       : 'text-slate-700 hover:text-slate-950'
@@ -579,6 +785,18 @@ export default function App() {
                 >
                   <CreditCard className="w-4 h-4" />
                   <span>शुल्क विवरण (Fees)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminStudentTab('attendance')}
+                  className={`px-3.5 py-1.5 sm:py-2 rounded-lg font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all cursor-pointer ${
+                    adminStudentTab === 'attendance'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-700 hover:text-slate-950'
+                  }`}
+                >
+                  <CalendarCheck className="w-4 h-4" />
+                  <span>अनुपस्थिति (Absent Log)</span>
                 </button>
               </div>
             </div>
@@ -591,11 +809,17 @@ export default function App() {
                 onViewFees={() => setAdminStudentTab('fees')}
                 lastUpdated={lastUpdated}
               />
-            ) : (
+            ) : adminStudentTab === 'fees' ? (
               <StudentFeesView
                 student={currentStudent}
                 feeRecord={adminStudentFeeRecord}
                 onPrint={() => window.print()}
+                onBack={handleAppBack}
+                lastUpdated={lastUpdated}
+              />
+            ) : (
+              <StudentAttendanceView
+                student={currentStudent}
                 onBack={handleAppBack}
                 lastUpdated={lastUpdated}
               />
@@ -740,6 +964,14 @@ export default function App() {
           students={students}
           fees={fees}
           lastUpdated={lastUpdated}
+        />
+      )}
+
+      {/* Integration & Publish Modal */}
+      {showPublishModal && (
+        <PublishAndEmbedModal
+          isOpen={showPublishModal}
+          onClose={() => setShowPublishModal(false)}
         />
       )}
 

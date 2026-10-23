@@ -73,7 +73,7 @@ export const SCHOOL_INFO: SchoolInfo = {
   location: 'सेमरिया, जिला-रीवा (म.प्र.)',
   diceCode: '23140402055',
   institutionCode: '322517',
-  academicSession: '2025-26',
+  academicSession: '2026-27',
 };
 
 export const DEFAULT_UPDATE_TIMESTAMP = '22-Sep-2026, 04:30 PM';

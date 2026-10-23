@@ -80,10 +80,10 @@ export const AdminOnePagePrintSummary: React.FC<AdminOnePagePrintSummaryProps> =
 
   const examLabel =
     selectedExam === 'quarterly'
-      ? 'त्रैमासिक परीक्षा 2024-25'
+      ? 'त्रैमासिक परीक्षा 2026-27'
       : selectedExam === 'halfYearly'
-      ? 'अर्द्धवार्षिक परीक्षा 2024-25'
-      : 'वार्षिक परीक्षा 2024-25';
+      ? 'अर्द्धवार्षिक परीक्षा 2026-27'
+      : 'वार्षिक परीक्षा 2026-27';
 
   const isAll = selectedClass === 'ALL';
 

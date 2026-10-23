@@ -12,7 +12,9 @@ import {
   ExternalLink,
   MessageSquareText,
   Globe,
-  HelpCircle
+  HelpCircle,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { ParsedStudent, SCHOOL_INFO, SCHOOL_LOGO_URL } from '../utils/reportCardParser';
 import { StudentFeeRecord, findStudentFeeRecord } from '../utils/feesParser';
@@ -41,16 +43,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   // Student Form State
   const [scholarNumber, setScholarNumber] = useState('');
   const [rollNumber, setRollNumber] = useState('');
+  const [showStudentPassword, setShowStudentPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
   const [studentError, setStudentError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [syncStatus, setSyncStatus] = useState('');
 
   // Admin Form State
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [adminError, setAdminError] = useState('');
 
-  // Strict matching helper: Requires BOTH Scholar Number and Roll Number to match
+  // Strict matching helper: Requires BOTH Scholar Number (User ID) AND Roll Number (Password)
+  // Rejects any record where either scholar number or roll number is missing from data
   const findMatch = (
     studentList: ParsedStudent[],
     schInput: string,
@@ -59,28 +63,28 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     const cleanScholar = schInput.trim().toLowerCase().replace(/\s+/g, '');
     const cleanRoll = rollInput.trim().toLowerCase().replace(/\s+/g, '');
 
-    // Strictly requires both inputs
     if (!cleanScholar || !cleanRoll) return undefined;
 
-    const numScholar = parseInt(cleanScholar, 10);
-    const numRoll = parseInt(cleanRoll, 10);
+    const numScholar = parseInt(cleanScholar.replace(/\D/g, ''), 10);
+    const numRoll = parseInt(cleanRoll.replace(/\D/g, ''), 10);
 
     for (const s of studentList) {
-      const sSch = String(s.scholarNo || '').trim().toLowerCase().replace(/\s+/g, '');
-      const sRoll = String(s.rollNo || '').trim().toLowerCase().replace(/\s+/g, '');
+      const rawSch = String(s.scholarNo || '').trim();
+      const rawRoll = String(s.rollNo || '').trim();
 
-      // Strict rule: If student record in data has NO roll number, login is NOT permitted
-      if (!sRoll || sRoll === '-' || sRoll === 'null' || sRoll === 'undefined') {
+      // If either scholar number or roll number is missing in dataset, student cannot log in
+      if (!rawSch || !rawRoll) {
         continue;
       }
 
-      const sNumSch = parseInt(sSch, 10);
-      const sNumRoll = parseInt(sRoll, 10);
+      const sSch = rawSch.toLowerCase().replace(/\s+/g, '');
+      const sRoll = rawRoll.toLowerCase().replace(/\s+/g, '');
+      const sNumSch = parseInt(sSch.replace(/\D/g, ''), 10);
+      const sNumRoll = parseInt(sRoll.replace(/\D/g, ''), 10);
 
       const scholarMatches = (sSch === cleanScholar) || (!isNaN(numScholar) && sNumSch === numScholar);
       const rollMatches = (sRoll === cleanRoll) || (!isNaN(numRoll) && sNumRoll === numRoll);
 
-      // BOTH Scholar Number and Roll Number MUST match
       if (scholarMatches && rollMatches) {
         return s;
       }
@@ -96,40 +100,81 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     const trimmedScholar = scholarNumber.trim();
     const trimmedRoll = rollNumber.trim();
 
-    // Strict validation: Both are mandatory
+    // Strict validation: BOTH User ID and Password are strictly compulsory
     if (!trimmedScholar || !trimmedRoll) {
-      setStudentError('लॉगिन के लिए स्कॉलर नंबर एवं रोल नंबर दोनों दर्ज करना अनिवार्य है।');
+      setStudentError('कृपया यूजर आईडी (स्कॉलर नंबर) एवं पासवर्ड (रोल नंबर) दोनों दर्ज करें।');
       return;
     }
 
     setIsLoggingIn(true);
-    setSyncStatus('');
 
     try {
-      // 1. Check in currently loaded student list
+      // 1. Check in currently loaded student list strictly with Scholar + Roll
       let matched = findMatch(students, trimmedScholar, trimmedRoll);
 
-      // 2. If not found in memory, immediately fetch live Google Sheets data and retry
+      // 2. If not found in memory, background fetch live data and retry
       if (!matched && onSyncLiveData) {
-        setSyncStatus('नवीनतम रिकॉर्ड प्राप्त किया जा रहा है...');
         try {
           const freshData = await onSyncLiveData();
           if (freshData?.students) {
             matched = findMatch(freshData.students, trimmedScholar, trimmedRoll);
           }
         } catch (fetchErr) {
-          console.warn('Instant fetch on login failed:', fetchErr);
+          console.warn('Background fetch error:', fetchErr);
+        }
+      }
+
+      // 3. If not found in primary list, check attendance database directly
+      if (!matched) {
+        try {
+          const { getStudentAttendanceFromFirestore } = await import('../utils/firebase');
+          const att = await getStudentAttendanceFromFirestore(trimmedScholar);
+          if (att) {
+            const cleanRoll = trimmedRoll.toLowerCase().replace(/\s+/g, '');
+            const rawAttRoll = String(att.rollNo || '').trim();
+
+            // Both scholar number and roll number must be present in attendance record
+            if (!rawAttRoll) {
+              setStudentError('अमान्य क्रेडेंशियल्स! सही यूजर आईडी एवं पासवर्ड दर्ज करें।');
+              return;
+            }
+
+            const attRoll = rawAttRoll.toLowerCase().replace(/\s+/g, '');
+            const numAttRoll = parseInt(attRoll.replace(/\D/g, ''), 10);
+            const numInputRoll = parseInt(cleanRoll.replace(/\D/g, ''), 10);
+
+            const rollMatches = attRoll === cleanRoll || (!isNaN(numAttRoll) && numAttRoll === numInputRoll);
+            if (!rollMatches) {
+              setStudentError('अमान्य क्रेडेंशियल्स! सही यूजर आईडी एवं पासवर्ड दर्ज करें।');
+              return;
+            }
+
+            matched = {
+              scholarNo: att.scholarNo || trimmedScholar,
+              rollNo: rawAttRoll,
+              name: att.studentName || `विद्यार्थी (स्कॉलर: ${trimmedScholar})`,
+              fatherName: 'अभिभावक',
+              mobile: '',
+              className: att.className || 'सामान्य',
+              sheetName: 'Attendance',
+              quarterly: null,
+              halfYearly: null,
+              annual: null,
+              rawRow: [],
+            };
+          }
+        } catch (attErr) {
+          console.warn('Login lookup error:', attErr);
         }
       }
 
       if (matched) {
         await onStudentLoginSuccess(matched);
       } else {
-        setStudentError('अमान्य स्कॉलर नंबर अथवा रोल नंबर! कृपया सही स्कॉलर नंबर एवं रोल नंबर दर्ज करें। यदि डेटा में रोल नंबर उपलब्ध नहीं है तो लॉगिन संभव नहीं है।');
+        setStudentError('अमान्य क्रेडेंशियल्स! सही यूजर आईडी एवं पासवर्ड दर्ज करें।');
       }
     } finally {
       setIsLoggingIn(false);
-      setSyncStatus('');
     }
   };
 
@@ -261,13 +306,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                   <h2 className="text-base sm:text-lg font-black text-slate-900">
                     विद्यार्थी डिजिटल पोर्टल
                   </h2>
-                  <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-[11px] font-bold text-blue-800">
-                    <span>🎓 परीक्षा परिणाम (Result)</span>
+                  <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-[11px] font-bold text-blue-800">
+                    <span>🎓 परीक्षा परिणाम</span>
                     <span>•</span>
-                    <span>💳 शुल्क विवरण (Fees)</span>
+                    <span>💳 शुल्क विवरण</span>
+                    <span>•</span>
+                    <span>📋 अनुपस्थिति विवरण (Absent Log)</span>
                   </div>
                   <p className="text-xs text-slate-500 mt-2">
-                    स्कॉलर नंबर एवं रोल नंबर दोनों दर्ज कर लॉगिन करें
+                    यूजर आईडी (स्कॉलर नंबर) एवं पासवर्ड (रोल नंबर) दर्ज करके लॉगिन करें
                   </p>
                 </div>
 
@@ -281,7 +328,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 <form onSubmit={handleStudentSubmit} className="space-y-3.5">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      स्कॉलर नंबर (Scholar Number) *
+                      यूजर आईडी (स्कॉलर नंबर) *
                     </label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -293,7 +340,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                         onChange={(e) => setScholarNumber(e.target.value)}
                         placeholder="स्कॉलर नंबर दर्ज करें"
                         className="w-full pl-10 pr-3.5 py-2.5 sm:py-3 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-[#1a73e8] focus:border-[#1a73e8] outline-none transition-all placeholder:font-sans placeholder:font-normal placeholder:text-slate-400"
-                        autoComplete="off"
+                        autoComplete="username"
                         required
                         disabled={isLoggingIn}
                       />
@@ -302,23 +349,47 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      रोल नंबर (Roll Number) *
+                      पासवर्ड (रोल नंबर) *
                     </label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                        <Hash className="w-4 h-4" />
+                        <KeyRound className="w-4 h-4" />
                       </div>
                       <input
-                        type="text"
+                        type={showStudentPassword ? 'text' : 'password'}
                         value={rollNumber}
                         onChange={(e) => setRollNumber(e.target.value)}
                         placeholder="रोल नंबर दर्ज करें"
-                        className="w-full pl-10 pr-3.5 py-2.5 sm:py-3 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-[#1a73e8] focus:border-[#1a73e8] outline-none transition-all placeholder:font-sans placeholder:font-normal placeholder:text-slate-400"
-                        autoComplete="off"
+                        className="w-full pl-10 pr-10 py-2.5 sm:py-3 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 bg-slate-50/50 focus:bg-white focus:ring-2 focus:ring-[#1a73e8] focus:border-[#1a73e8] outline-none transition-all placeholder:font-sans placeholder:font-normal placeholder:text-slate-400"
+                        autoComplete="current-password"
                         required
                         disabled={isLoggingIn}
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowStudentPassword(!showStudentPassword)}
+                        className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-700 cursor-pointer"
+                        title={showStudentPassword ? 'पासवर्ड छुपाएं' : 'पासवर्ड देखें'}
+                      >
+                        {showStudentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
                     </div>
+                  </div>
+
+                  {/* 30-day persistent session option */}
+                  <div className="flex items-center justify-between text-xs text-slate-600 px-1 pt-1">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer accent-blue-600"
+                      />
+                      <span className="font-semibold text-slate-700">लॉगिन सुरक्षित रखें (30 दिनों तक)</span>
+                    </label>
+                    <span className="text-[10px] text-emerald-800 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                      ऑटो-लॉगिन सक्रिय
+                    </span>
                   </div>
 
                   <div className="pt-2">
@@ -330,7 +401,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       {isLoggingIn ? (
                         <>
                           <Loader2 className="w-5 h-5 animate-spin" />
-                          <span>{syncStatus || 'डेटा सिंक एवं लॉगिन हो रहा है...'}</span>
+                          <span>सत्यापन हो रहा है...</span>
                         </>
                       ) : (
                         <>
@@ -341,13 +412,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                     </button>
                   </div>
                 </form>
-
-                {/* Helpful Instruction Box */}
-                <div className="mt-3.5 pt-2.5 border-t border-slate-100 text-center">
-                  <p className="text-[11px] text-slate-500 font-medium">
-                    लॉगिन हेतु स्कॉलर नंबर एवं रोल नंबर दोनों आवश्यक हैं। दोनों विवरण सही होने पर ही लॉगिन होगा।
-                  </p>
-                </div>
               </div>
             ) : (
               /* Admin Login Form */

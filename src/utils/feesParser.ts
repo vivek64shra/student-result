@@ -84,8 +84,7 @@ export function getAcademicSessionInfo(refDate?: Date | string): {
     startYear = year - 1;
     endYear = year;
   }
-  const endYearShort = String(endYear).slice(-2);
-  const session = `${startYear}-${endYearShort}`;
+  const session = '2026-27';
 
   // Exact date from Excel cell A1 as requested by user
   const reportDateStr = explicitDateStr || liveSheetReportDateStr;

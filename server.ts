@@ -5,10 +5,20 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 
+import { getInitialCachedStudents, SCHOOL_INFO, ParsedStudent } from './src/utils/reportCardParser';
+
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// In-memory student cache for ultra-fast API responses
+let serverStudentCache: ParsedStudent[] = [];
+try {
+  serverStudentCache = getInitialCachedStudents().students;
+} catch (e) {
+  console.warn('Initial server student cache setup error:', e);
+}
 
 async function startServer() {
   const app = express();
@@ -16,9 +26,126 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Public CORS middleware for /api/public endpoints so any external app can access
+  app.use('/api/public', (_req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (_req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
   // Health check API
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // Public Results Metadata & Google Sheets Links API
+  app.get('/api/public/sheets', (_req, res) => {
+    res.json({
+      success: true,
+      school: SCHOOL_INFO,
+      sheets: {
+        resultPublishedHtml: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTJACfw2mytnCs_RBtLI4UbW5DKj15umzZJ36XNybQqCLn9wYmkeJKu_M8lTbKEG9-1mNlO3D8R1Kf6/pubhtml',
+        resultDirectXlsx: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTJACfw2mytnCs_RBtLI4UbW5DKj15umzZJ36XNybQqCLn9wYmkeJKu_M8lTbKEG9-1mNlO3D8R1Kf6/pub?output=xlsx',
+        feesPublishedCsv: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSv0gTbGo5P8wkB4CYuVIWzvXDOu1INb_L8beoaLYrXIyw9noqOIIln5PxxlP2S9apBakQfq48_YLZ8/pub?output=csv'
+      }
+    });
+  });
+
+  // Public Single Student Result API (usable by WordPress, Mobile Apps, or Other Sites)
+  app.get('/api/public/result/:scholarNo', (req, res) => {
+    try {
+      const scholarParam = String(req.params.scholarNo || '').trim().toLowerCase();
+      const rollParam = req.query.roll ? String(req.query.roll).trim().toLowerCase() : '';
+      const numScholar = parseInt(scholarParam.replace(/\D/g, ''), 10);
+      const numRoll = rollParam ? parseInt(rollParam.replace(/\D/g, ''), 10) : NaN;
+
+      const student = serverStudentCache.find((s) => {
+        const sSch = String(s.scholarNo || '').trim().toLowerCase();
+        const sNumSch = parseInt(sSch.replace(/\D/g, ''), 10);
+        const scholarMatches = sSch === scholarParam || (!isNaN(numScholar) && sNumSch === numScholar);
+
+        if (!scholarMatches) return false;
+
+        if (rollParam) {
+          const sRoll = String(s.rollNo || '').trim().toLowerCase();
+          const sNumRoll = parseInt(sRoll.replace(/\D/g, ''), 10);
+          return sRoll === rollParam || (!isNaN(numRoll) && sNumRoll === numRoll);
+        }
+
+        return true;
+      });
+
+      if (!student) {
+        return res.status(404).json({
+          success: false,
+          error: 'विद्यार्थी नहीं मिला (Student record not found for scholar number: ' + scholarParam + ')'
+        });
+      }
+
+      // Format clean result response
+      return res.json({
+        success: true,
+        school: SCHOOL_INFO,
+        student: {
+          scholarNo: student.scholarNo,
+          rollNo: student.rollNo,
+          name: student.name,
+          fatherName: student.fatherName,
+          className: student.className,
+          quarterly: student.quarterly,
+          halfYearly: student.halfYearly,
+          annual: student.annual
+        },
+        embedUrl: `/?scholar=${student.scholarNo}&roll=${student.rollNo}&view=result&embed=true`
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Public Students Roster / Search API for external dropdowns and integrations
+  app.get('/api/public/students', (req, res) => {
+    try {
+      const classQuery = req.query.className ? String(req.query.className).trim().toUpperCase() : '';
+      const searchQuery = req.query.q ? String(req.query.q).trim().toLowerCase() : '';
+      const limit = Math.min(parseInt(String(req.query.limit || '100'), 10) || 100, 500);
+
+      let list = serverStudentCache;
+      if (classQuery && classQuery !== 'ALL') {
+        list = list.filter((s) => (s.className || '').toUpperCase() === classQuery);
+      }
+      if (searchQuery) {
+        list = list.filter((s) => 
+          (s.name || '').toLowerCase().includes(searchQuery) ||
+          String(s.scholarNo).toLowerCase().includes(searchQuery) ||
+          String(s.rollNo).toLowerCase().includes(searchQuery)
+        );
+      }
+
+      const results = list.slice(0, limit).map((s) => ({
+        scholarNo: s.scholarNo,
+        rollNo: s.rollNo,
+        name: s.name,
+        fatherName: s.fatherName,
+        className: s.className,
+        hasQuarterly: Boolean(s.quarterly?.rows && s.quarterly.rows.length > 0),
+        hasHalfYearly: Boolean(s.halfYearly?.rows && s.halfYearly.rows.length > 0),
+        hasAnnual: Boolean(s.annual?.rows && s.annual.rows.length > 0)
+      }));
+
+      return res.json({
+        success: true,
+        total: list.length,
+        returned: results.length,
+        students: results
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   // Google Sheets Proxy Endpoints (guarantees fast, reliable, CORS-free fetching on mobile networks)
