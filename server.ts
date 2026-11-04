@@ -148,37 +148,109 @@ async function startServer() {
     }
   });
 
+  // Server-side cache for sheet buffer & fees text with instant response (Stale-While-Revalidate)
+  let cachedSheetBuffer: Buffer | null = null;
+  let cachedSheetTime = 0;
+  let cachedFeesText: string | null = null;
+  let cachedFeesTime = 0;
+  const CACHE_DURATION_MS = 60 * 1000; // 1 minute fresh cache, instantaneous response
+
   // Google Sheets Proxy Endpoints (guarantees fast, reliable, CORS-free fetching on mobile networks)
   app.get('/api/proxy/sheet', async (_req, res) => {
     try {
-      const response = await fetch(
+      const now = Date.now();
+      if (cachedSheetBuffer && now - cachedSheetTime < CACHE_DURATION_MS) {
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('X-Cache-Status', 'HIT');
+        return res.send(cachedSheetBuffer);
+      }
+
+      // Background revalidate or immediate fetch
+      const fetchPromise = fetch(
         'https://docs.google.com/spreadsheets/d/e/2PACX-1vTJACfw2mytnCs_RBtLI4UbW5DKj15umzZJ36XNybQqCLn9wYmkeJKu_M8lTbKEG9-1mNlO3D8R1Kf6/pub?output=xlsx',
         { headers: { 'User-Agent': 'Mozilla/5.0' } }
-      );
-      if (!response.ok) {
-        return res.status(response.status).send('Failed to fetch sheet from Google');
+      ).then(async (response) => {
+        if (response.ok) {
+          const buffer = await response.arrayBuffer();
+          cachedSheetBuffer = Buffer.from(buffer);
+          cachedSheetTime = Date.now();
+          return cachedSheetBuffer;
+        }
+        return null;
+      }).catch((err) => {
+        console.warn('Background sheet fetch error:', err.message);
+        return null;
+      });
+
+      // If we have existing stale buffer, send it immediately and refresh in background!
+      if (cachedSheetBuffer) {
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('X-Cache-Status', 'STALE');
+        return res.send(cachedSheetBuffer);
       }
-      const buffer = await response.arrayBuffer();
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.send(Buffer.from(buffer));
+
+      // First time: wait for fetch
+      const buf = await fetchPromise;
+      if (buf) {
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('X-Cache-Status', 'MISS');
+        return res.send(buf);
+      }
+
+      return res.status(502).send('Failed to fetch sheet from Google');
     } catch (err: any) {
+      if (cachedSheetBuffer) {
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        return res.send(cachedSheetBuffer);
+      }
       res.status(500).json({ error: err.message });
     }
   });
 
   app.get('/api/proxy/fees', async (_req, res) => {
     try {
-      const response = await fetch(
+      const now = Date.now();
+      if (cachedFeesText && now - cachedFeesTime < CACHE_DURATION_MS) {
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('X-Cache-Status', 'HIT');
+        return res.send(cachedFeesText);
+      }
+
+      const fetchPromise = fetch(
         'https://docs.google.com/spreadsheets/d/e/2PACX-1vSv0gTbGo5P8wkB4CYuVIWzvXDOu1INb_L8beoaLYrXIyw9noqOIIln5PxxlP2S9apBakQfq48_YLZ8/pub?output=csv',
         { headers: { 'User-Agent': 'Mozilla/5.0' } }
-      );
-      if (!response.ok) {
-        return res.status(response.status).send('Failed to fetch fees from Google');
+      ).then(async (response) => {
+        if (response.ok) {
+          const text = await response.text();
+          cachedFeesText = text;
+          cachedFeesTime = Date.now();
+          return cachedFeesText;
+        }
+        return null;
+      }).catch((err) => {
+        console.warn('Background fees fetch error:', err.message);
+        return null;
+      });
+
+      if (cachedFeesText) {
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('X-Cache-Status', 'STALE');
+        return res.send(cachedFeesText);
       }
-      const text = await response.text();
-      res.setHeader('Content-Type', 'text/csv');
-      res.send(text);
+
+      const text = await fetchPromise;
+      if (text) {
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('X-Cache-Status', 'MISS');
+        return res.send(text);
+      }
+
+      return res.status(502).send('Failed to fetch fees from Google');
     } catch (err: any) {
+      if (cachedFeesText) {
+        res.setHeader('Content-Type', 'text/csv');
+        return res.send(cachedFeesText);
+      }
       res.status(500).json({ error: err.message });
     }
   });

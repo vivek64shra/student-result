@@ -11,7 +11,9 @@ import {
   CalendarCheck,
   CheckCircle2,
   Clock,
-  Sparkles
+  Sparkles,
+  Users,
+  Phone
 } from 'lucide-react';
 import { ParsedStudent, SCHOOL_INFO, SCHOOL_LOGO_URL } from '../utils/reportCardParser';
 import { MAIN_SCHOOL_WEBSITE_URL } from './LoginPage';
@@ -22,6 +24,8 @@ interface StudentPortalChoiceViewProps {
   onLogout: () => void;
   studentHasResult: boolean;
   sessionString: string;
+  siblings?: ParsedStudent[];
+  onSwitchStudent?: (student: ParsedStudent) => void;
 }
 
 export const StudentPortalChoiceView: React.FC<StudentPortalChoiceViewProps> = React.memo(({
@@ -30,6 +34,8 @@ export const StudentPortalChoiceView: React.FC<StudentPortalChoiceViewProps> = R
   onLogout,
   studentHasResult,
   sessionString,
+  siblings = [],
+  onSwitchStudent,
 }) => {
   return (
     <div className="min-h-screen bg-[#f1f4f9] p-3 sm:p-6 md:p-8 text-slate-900 font-sans flex flex-col justify-between">
@@ -82,6 +88,59 @@ export const StudentPortalChoiceView: React.FC<StudentPortalChoiceViewProps> = R
             </button>
           </div>
         </div>
+
+        {/* Sibling Students Banner (When 2 or more children share the same parent mobile number) */}
+        {siblings && siblings.length > 1 && onSwitchStudent && (
+          <div className="bg-gradient-to-r from-indigo-900 via-blue-900 to-indigo-950 text-white rounded-3xl p-4 sm:p-5 shadow-md border-2 border-indigo-400/40 mb-5 sm:mb-6 animate-fadeIn">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/15">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-black shrink-0">
+                  <Users className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs sm:text-sm font-black text-amber-300 flex items-center gap-1.5">
+                    <span>समान मोबाइल नंबर से जुड़े भाई-बहन ({siblings.length} विद्यार्थी)</span>
+                    <span className="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full font-mono">
+                      {student.mobile ? `+91 ${student.mobile}` : 'Verified Phone'}
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-indigo-200 mt-0.5">
+                    इस परिवार के सभी बच्चों का रिजल्ट, फीस एवं उपस्थिति देखने हेतु नीचे छात्र के नाम पर क्लिक करें:
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 flex flex-wrap gap-2.5">
+              {siblings.map((sib) => {
+                const isSelected = String(sib.scholarNo || '').trim().toLowerCase() === String(student.scholarNo || '').trim().toLowerCase();
+                return (
+                  <button
+                    key={sib.scholarNo}
+                    type="button"
+                    onClick={() => onSwitchStudent(sib)}
+                    className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-xs ${
+                      isSelected
+                        ? 'bg-amber-400 text-slate-950 font-black ring-2 ring-white shadow-md scale-102'
+                        : 'bg-white/10 hover:bg-white/20 text-white border border-white/20'
+                    }`}
+                  >
+                    <GraduationCap className={`w-3.5 h-3.5 ${isSelected ? 'text-slate-950' : 'text-amber-300'}`} />
+                    <span className="uppercase">{sib.name}</span>
+                    <span className={`text-[10.5px] px-1.5 py-0.5 rounded-md ${
+                      isSelected ? 'bg-slate-950 text-white font-mono' : 'bg-black/30 text-indigo-200'
+                    }`}>
+                      कक्षा: {sib.className}
+                    </span>
+                    {isSelected && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Big Choice Cards Section Header */}
         <div className="text-center mb-5 sm:mb-6">

@@ -59,6 +59,47 @@ export interface ParsedStudent {
 
 export const SCHOOL_LOGO_URL = SCHOOL_LOGO_DATA_URL;
 
+/**
+ * Normalizes an Indian phone number to 10 digits
+ */
+export function cleanMobileNumber(mobileVal: any): string {
+  const digits = String(mobileVal || '').replace(/\D/g, '');
+  if (digits.length >= 10) {
+    return digits.slice(-10);
+  }
+  return '';
+}
+
+/**
+ * Identifies sibling students enrolled with the same parent mobile number
+ */
+export function findSiblingStudents(
+  targetStudent: ParsedStudent | null | undefined,
+  allStudents: ParsedStudent[]
+): ParsedStudent[] {
+  if (!targetStudent || !allStudents || allStudents.length === 0) return [];
+  const targetMob = cleanMobileNumber(targetStudent.mobile);
+  if (!targetMob) {
+    // If target student has no 10-digit mobile, only return targetStudent itself
+    return [targetStudent];
+  }
+
+  const siblings = allStudents.filter((s) => {
+    const sMob = cleanMobileNumber(s.mobile);
+    return sMob === targetMob;
+  });
+
+  // Ensure target student is at index 0
+  const cleanTargetSch = String(targetStudent.scholarNo || '').trim().toLowerCase();
+  const sorted = [...siblings].sort((a, b) => {
+    if (String(a.scholarNo || '').trim().toLowerCase() === cleanTargetSch) return -1;
+    if (String(b.scholarNo || '').trim().toLowerCase() === cleanTargetSch) return 1;
+    return compareClassNames(a.className, b.className);
+  });
+
+  return sorted.length > 0 ? sorted : [targetStudent];
+}
+
 export function getLatestActiveExam(students: ParsedStudent[]): 'quarterly' | 'halfYearly' | 'annual' {
   if (!students || students.length === 0) return 'quarterly';
   const hasAnnual = students.some((s) => s.annual?.rows && s.annual.rows.length > 0);
@@ -612,16 +653,31 @@ export function mergeStudentsWithFeesData(
     const rawName = f['Student Name'] !== undefined ? String(f['Student Name']).trim() : '';
     const rawFather = f['Father Name'] !== undefined ? String(f['Father Name']).trim() : '';
     const rawClass = f['Class Name'] !== undefined ? String(f['Class Name']).trim() : '';
+    const rawMobile = f['Mobile'] !== undefined ? String(f['Mobile']).trim() : (f['Mobile No'] ? String(f['Mobile No']).trim() : '');
 
     if (!rawScholar && !rawName) return;
 
     const lowerScholar = rawScholar.toLowerCase();
     const nameFatherKey = `${rawName.toLowerCase()}_${rawFather.toLowerCase()}`;
 
-    if (
-      (lowerScholar && existingScholarKeys.has(lowerScholar)) ||
-      (rawName && existingNameFatherKeys.has(nameFatherKey))
-    ) {
+    // If student already exists from main sheet, ensure mobile is backfilled if missing
+    if (lowerScholar && existingScholarKeys.has(lowerScholar)) {
+      if (rawMobile) {
+        const found = merged.find((s) => String(s.scholarNo || '').trim().toLowerCase() === lowerScholar);
+        if (found && !found.mobile) {
+          found.mobile = rawMobile;
+        }
+      }
+      return;
+    }
+
+    if (rawName && existingNameFatherKeys.has(nameFatherKey)) {
+      if (rawMobile) {
+        const found = merged.find((s) => `${String(s.name || '').trim().toLowerCase()}_${String(s.fatherName || '').trim().toLowerCase()}` === nameFatherKey);
+        if (found && !found.mobile) {
+          found.mobile = rawMobile;
+        }
+      }
       return;
     }
 
@@ -633,7 +689,7 @@ export function mergeStudentsWithFeesData(
       rollNo: rawScholar, // Use scholar number as fallback roll number for student lookup
       name: rawName,
       fatherName: rawFather,
-      mobile: '',
+      mobile: rawMobile,
       className: rawClass || 'General',
       sheetName: '',
       quarterly: null,

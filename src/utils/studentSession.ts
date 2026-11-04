@@ -15,6 +15,7 @@ export interface StoredStudentSession {
   name: string;
   fatherName: string;
   className: string;
+  mobile?: string;
   savedAt: number;
   expiresAt: number;
   autoLogin: boolean;
@@ -36,6 +37,7 @@ export function saveStudentSession(student: ParsedStudent, autoLogin: boolean = 
       name: student.name || '',
       fatherName: student.fatherName || '',
       className: student.className || '',
+      mobile: String(student.mobile || '').trim(),
       savedAt: now,
       expiresAt,
       autoLogin,

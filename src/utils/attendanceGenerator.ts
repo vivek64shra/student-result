@@ -28,6 +28,10 @@ export interface StudentAbsenteeSummary {
   absentDates: AbsentDateRecord[];
   totalAbsentDays: number;
   hasAbsenceRecorded: boolean;
+  schoolWorkingDates?: string[];
+  totalWorkingDays?: number;
+  totalPresentDays?: number;
+  attendancePercentage?: string;
   isLoading?: boolean;
 }
 
@@ -149,9 +153,17 @@ export async function removeStudentAbsentDate(scholarNo: string | number, record
   }
 }
 
-// Retrieve summary for student based ONLY on their scholar number (Instant initial read)
 export function getStudentAbsenteeSummary(student: ParsedStudent): StudentAbsenteeSummary {
-  const absentDates = getStudentAbsentDates(student.scholarNo);
+  const cleanScholar = String(student.scholarNo ?? '').trim().toLowerCase();
+  let cachedFirestore: any = null;
+  try {
+    const raw = localStorage.getItem(`firestore_att_${cleanScholar}`);
+    if (raw) cachedFirestore = JSON.parse(raw);
+  } catch (e) {}
+
+  const absentDates = (cachedFirestore?.absentDates && cachedFirestore.absentDates.length > 0)
+    ? cachedFirestore.absentDates
+    : getStudentAbsentDates(student.scholarNo);
   const totalAbsentDays = absentDates.length;
 
   return {
@@ -164,6 +176,10 @@ export function getStudentAbsenteeSummary(student: ParsedStudent): StudentAbsent
     absentDates,
     totalAbsentDays,
     hasAbsenceRecorded: totalAbsentDays > 0,
+    schoolWorkingDates: cachedFirestore?.schoolWorkingDates || [],
+    totalWorkingDays: cachedFirestore?.totalWorkingDays || 0,
+    totalPresentDays: cachedFirestore?.totalPresentDays || 0,
+    attendancePercentage: cachedFirestore?.attendancePercentage || '100.0',
     isLoading: false,
   };
 }
@@ -173,7 +189,7 @@ export async function fetchLiveStudentAttendance(student: ParsedStudent): Promis
   const cleanScholar = String(student.scholarNo ?? '').trim().toLowerCase();
   
   try {
-    const cloudData = await getStudentAttendanceFromFirestore(cleanScholar);
+    const cloudData = await getStudentAttendanceFromFirestore(cleanScholar, student.className);
     if (cloudData) {
       const totalAbsentDays = cloudData.absentDates.length;
       return {
@@ -186,6 +202,10 @@ export async function fetchLiveStudentAttendance(student: ParsedStudent): Promis
         absentDates: cloudData.absentDates,
         totalAbsentDays,
         hasAbsenceRecorded: totalAbsentDays > 0,
+        schoolWorkingDates: cloudData.schoolWorkingDates || [],
+        totalWorkingDays: cloudData.totalWorkingDays || 0,
+        totalPresentDays: cloudData.totalPresentDays || 0,
+        attendancePercentage: cloudData.attendancePercentage || '100.0',
         isLoading: false,
       };
     }

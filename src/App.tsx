@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
   SCHOOL_INFO, 
   SCHOOL_LOGO_URL,
@@ -7,7 +7,9 @@ import {
   fetchLiveGoogleSheetData,
   formatUpdateTimestamp,
   hasStudentAnyExamData,
-  DEFAULT_UPDATE_TIMESTAMP
+  DEFAULT_UPDATE_TIMESTAMP,
+  findSiblingStudents,
+  cleanMobileNumber
 } from './utils/reportCardParser';
 import {
   StudentFeeRecord,
@@ -538,6 +540,19 @@ export default function App() {
     const sessionInfo = getAcademicSessionInfo();
     const studentHasResult = hasStudentAnyExamData(loggedInStudent);
 
+    // Compute sibling profiles linked by the same mobile number
+    const siblingStudents = findSiblingStudents(loggedInStudent, students);
+
+    const handleSwitchSibling = (sibling: ParsedStudent) => {
+      saveStudentSession(sibling);
+      setLoggedInStudent(sibling);
+      setCurrentStudent(sibling);
+      // Pre-warm attendance and sync
+      import('./utils/attendanceGenerator').then(({ fetchLiveStudentAttendance }) => {
+        fetchLiveStudentAttendance(sibling).catch(() => {});
+      }).catch(() => {});
+    };
+
     // SUB-VIEW 2A: The 3 Options Choice Menu (Shown right after login)
     if (studentPortalTab === 'menu') {
       return (
@@ -547,6 +562,8 @@ export default function App() {
           onLogout={handleLogout}
           studentHasResult={studentHasResult}
           sessionString={sessionInfo.session}
+          siblings={siblingStudents}
+          onSwitchStudent={handleSwitchSibling}
         />
       );
     }
@@ -554,6 +571,39 @@ export default function App() {
     // SUB-VIEW 2B: Result, Fees, or Attendance View (with Back to Menu option or Clean Embed)
     return (
       <div className={`min-h-screen ${isEmbedMode ? 'bg-white p-1 sm:p-2' : 'bg-[#f1f4f9] p-2 sm:p-4 md:p-6'} print:p-0 print:bg-white text-slate-900 font-sans`}>
+        {/* Quick Sibling Bar in Sub-Views if family has 2+ children */}
+        {siblingStudents && siblingStudents.length > 1 && !isEmbedMode && (
+          <div className="max-w-[1050px] mx-auto mb-3 bg-white p-2.5 sm:p-3 rounded-2xl shadow-xs border border-indigo-200 flex flex-wrap items-center justify-between gap-2 text-xs print:hidden">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-lg bg-amber-400 text-slate-950 flex items-center justify-center font-black">
+                👥
+              </span>
+              <span className="font-extrabold text-slate-800">
+                भाई-बहन प्रोफाइल:
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {siblingStudents.map((sib) => {
+                const isSelected = String(sib.scholarNo || '').trim().toLowerCase() === String(loggedInStudent.scholarNo || '').trim().toLowerCase();
+                return (
+                  <button
+                    key={sib.scholarNo}
+                    type="button"
+                    onClick={() => handleSwitchSibling(sib)}
+                    className={`px-2.5 py-1 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-blue-600 text-white shadow-xs font-black'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <span>{sib.name.split(' ')[0]} ({sib.className})</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {studentPortalTab === 'result' ? (
           <OfficialReportCard
             student={loggedInStudent}

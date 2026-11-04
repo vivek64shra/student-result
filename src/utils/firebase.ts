@@ -90,6 +90,16 @@ export interface FirestoreAbsentRecord {
   teacherName?: string;
 }
 
+export interface AttendanceDayStatus {
+  date: string; // YYYY-MM-DD
+  dayNumber: number;
+  dayName: string; // 'सोमवार', 'रविवार' etc.
+  status: 'present' | 'absent' | 'holiday' | 'sunday';
+  statusHindi: string; // 'उपस्थित', 'अनुपस्थित', 'विद्यालय अवकाश', 'रविवार'
+  reason?: string;
+  isSchoolWorkingDay: boolean;
+}
+
 export interface FirestoreStudentAttendance {
   scholarNo: string;
   rollNo?: string;
@@ -98,6 +108,11 @@ export interface FirestoreStudentAttendance {
   session: string;
   totalAbsentDays: number;
   absentDates: FirestoreAbsentRecord[];
+  // Present & School Calendar Analytics
+  schoolWorkingDates?: string[];
+  totalWorkingDays?: number;
+  totalPresentDays?: number;
+  attendancePercentage?: string;
   lastUpdated?: string;
   dataSource?: 'attendance_records' | 'attendance' | 'local';
 }
@@ -250,9 +265,11 @@ function normalizeAttendanceDoc(scholarNo: string, data: any): FirestoreStudentA
  * Automatically fetch student attendance from Firestore:
  * Synchronizes directly with the teacher attendance app database
  * (collections `attendance_records`, `daily_attendance`, `attendance`, `student_attendance`, `students`).
+ * Also detects all school working dates for this student's class so we know when the school was open!
  */
 export async function getStudentAttendanceFromFirestore(
-  scholarNo: string | number
+  scholarNo: string | number,
+  studentClass?: string
 ): Promise<FirestoreStudentAttendance | null> {
   const rawScholar = String(scholarNo ?? '').trim();
   const cleanScholar = rawScholar.toLowerCase();
@@ -261,132 +278,107 @@ export async function getStudentAttendanceFromFirestore(
   const numScholar = parseInt(cleanScholar.replace(/\D/g, ''), 10);
   const isNumeric = !isNaN(numScholar);
 
+  // Instant Cache Check: If cached locally within 10 minutes, return it immediately!
+  try {
+    const cachedRaw = localStorage.getItem(`mdhsss_firestore_att_${cleanScholar}`);
+    if (cachedRaw) {
+      const cachedParsed: FirestoreStudentAttendance = JSON.parse(cachedRaw);
+      if (cachedParsed && cachedParsed.absentDates) {
+        // Trigger background refresh without blocking user!
+        setTimeout(() => {
+          fetchFreshAttendanceFromFirestore(cleanScholar, rawScholar, numScholar, isNumeric, studentClass).catch(() => {});
+        }, 100);
+        return cachedParsed;
+      }
+    }
+  } catch {}
+
+  return await fetchFreshAttendanceFromFirestore(cleanScholar, rawScholar, numScholar, isNumeric, studentClass);
+}
+
+async function fetchFreshAttendanceFromFirestore(
+  cleanScholar: string,
+  rawScholar: string,
+  numScholar: number,
+  isNumeric: boolean,
+  studentClass?: string
+): Promise<FirestoreStudentAttendance | null> {
   const databases = [primaryDb, fallbackDb];
   const absentRecordsMap = new Map<string, FirestoreAbsentRecord>();
+  const workingDatesSet = new Set<string>();
 
   let detectedStudentName = '';
-  let detectedClassName = '';
+  let detectedClassName = studentClass || '';
   let detectedRollNo = '';
 
   for (const currentDb of databases) {
     try {
       // -----------------------------------------------------------------------
       // SOURCE 1: attendance_records & daily_attendance (Teacher daily registers)
-      // Teachers mark daily class attendance: docs contain date, className, teacherName, absentScholarNos
       // -----------------------------------------------------------------------
       const targetCollections = ['attendance_records', 'daily_attendance'];
 
       for (const colName of targetCollections) {
         try {
-          const searchQueries = [
-            query(collection(currentDb, colName), where('absentScholarNos', 'array-contains', cleanScholar)),
-          ];
+          const colRef = collection(currentDb, colName);
+          const allRecordsSnap = await getDocs(colRef);
 
-          if (rawScholar !== cleanScholar) {
-            searchQueries.push(
-              query(collection(currentDb, colName), where('absentScholarNos', 'array-contains', rawScholar))
-            );
-          }
+          allRecordsSnap.forEach((docSnap) => {
+            const data = docSnap.data();
+            const dateStr = extractDateString(data.date || data.attendanceDate || data.markedDate || data.savedDate || docSnap.id);
+            if (!dateStr) return;
 
-          if (isNumeric) {
-            searchQueries.push(
-              query(collection(currentDb, colName), where('absentScholarNos', 'array-contains', numScholar))
-            );
-          }
+            // Normalize class check
+            const docClass = String(data.className || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+            const targetClassNorm = String(detectedClassName || studentClass || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 
-          for (const q of searchQueries) {
-            try {
-              const querySnap = await getDocs(q);
-              querySnap.forEach((docSnap) => {
-                const data = docSnap.data();
-                const dateStr = extractDateString(data.date || data.attendanceDate || data.markedDate || data.savedDate || docSnap.id);
-                if (!dateStr) return;
+            const isSameClass = !targetClassNorm || !docClass || docClass === targetClassNorm || docClass.includes(targetClassNorm) || targetClassNorm.includes(docClass);
 
-                let reasonStr = `कक्षा ${data.className || ''} - दैनिक उपस्थिति पंजी में अनुपस्थित (शिक्षक: ${data.teacherName || 'कक्षाध्यापक'})`;
-                if (Array.isArray(data.absents)) {
-                  const matchedAbsentObj = data.absents.find((a: any) => {
-                    return matchesScholarValue(a?.scholarNo, cleanScholar, numScholar);
-                  });
-
-                  if (matchedAbsentObj) {
-                    if (matchedAbsentObj.name && !detectedStudentName) detectedStudentName = matchedAbsentObj.name;
-                    if (matchedAbsentObj.rollNo && !detectedRollNo) detectedRollNo = matchedAbsentObj.rollNo;
-                    if (matchedAbsentObj.reason) reasonStr = matchedAbsentObj.reason;
-                  }
-                }
-
-                if (data.className && !detectedClassName) detectedClassName = data.className;
-
-                const recordId = `${cleanScholar}_${dateStr}`;
-                absentRecordsMap.set(dateStr, {
-                  id: recordId,
-                  date: dateStr,
-                  dayName: getDayName(dateStr),
-                  reason: reasonStr,
-                  session: '2026-27',
-                  markedAt: data.savedAtFormatted || data.updatedAt || new Date().toLocaleString('hi-IN'),
-                  className: data.className || '',
-                  teacherName: data.teacherName || '',
-                });
-              });
-            } catch (queryErr) {
-              // Ignore single index errors
+            // If any attendance record exists for this date, the school was open!
+            if (isSameClass) {
+              workingDatesSet.add(dateStr);
             }
-          }
 
-          // Full collection scan if query returned 0 items
-          if (absentRecordsMap.size === 0) {
-            try {
-              const allRecordsSnap = await getDocs(collection(currentDb, colName));
-              allRecordsSnap.forEach((docSnap) => {
-                const data = docSnap.data();
-                const dateStr = extractDateString(data.date || data.attendanceDate || data.markedDate || data.savedDate || docSnap.id);
-                if (!dateStr) return;
+            const nos: any[] = Array.isArray(data.absentScholarNos) ? data.absentScholarNos : [];
+            const absentsList: any[] = Array.isArray(data.absents) ? data.absents : [];
+            const recordsList: any[] = Array.isArray(data.records) ? data.records : (Array.isArray(data.students) ? data.students : []);
 
-                const nos: any[] = Array.isArray(data.absentScholarNos) ? data.absentScholarNos : [];
-                const absentsList: any[] = Array.isArray(data.absents) ? data.absents : [];
-                const recordsList: any[] = Array.isArray(data.records) ? data.records : (Array.isArray(data.students) ? data.students : []);
+            const isScholarInNos = nos.some((item) => matchesScholarValue(item, cleanScholar, numScholar));
+            const isScholarInAbsents = absentsList.some((item) => matchesScholarValue(item?.scholarNo || item, cleanScholar, numScholar));
+            const isScholarInRecords = recordsList.some((item) => {
+              if (matchesScholarValue(item?.scholarNo || item?.id, cleanScholar, numScholar)) {
+                const st = String(item?.status || '').trim().toLowerCase();
+                return st === 'a' || st === 'absent' || st === 'अनुपस्थित';
+              }
+              return false;
+            });
 
-                const isScholarInNos = nos.some((item) => matchesScholarValue(item, cleanScholar, numScholar));
-                const isScholarInAbsents = absentsList.some((item) => matchesScholarValue(item?.scholarNo || item, cleanScholar, numScholar));
-                const isScholarInRecords = recordsList.some((item) => {
-                  if (matchesScholarValue(item?.scholarNo || item?.id, cleanScholar, numScholar)) {
-                    const st = String(item?.status || '').trim().toLowerCase();
-                    return st === 'a' || st === 'absent' || st === 'अनुपस्थित';
-                  }
-                  return false;
-                });
+            if (isScholarInNos || isScholarInAbsents || isScholarInRecords) {
+              let reasonStr = `कक्षा ${data.className || ''} - दैनिक उपस्थिति पंजी में अनुपस्थित (शिक्षक: ${data.teacherName || 'कक्षाध्यापक'})`;
+              
+              const matchedObj = absentsList.find((a: any) => matchesScholarValue(a?.scholarNo || a, cleanScholar, numScholar));
+              if (matchedObj) {
+                if (matchedObj.name && !detectedStudentName) detectedStudentName = matchedObj.name;
+                if (matchedObj.rollNo && !detectedRollNo) detectedRollNo = matchedObj.rollNo;
+                if (matchedObj.reason) reasonStr = matchedObj.reason;
+              }
 
-                if (isScholarInNos || isScholarInAbsents || isScholarInRecords) {
-                  let reasonStr = `कक्षा ${data.className || ''} - दैनिक उपस्थिति पंजी में अनुपस्थित (शिक्षक: ${data.teacherName || 'कक्षाध्यापक'})`;
-                  
-                  const matchedObj = absentsList.find((a: any) => matchesScholarValue(a?.scholarNo || a, cleanScholar, numScholar));
-                  if (matchedObj) {
-                    if (matchedObj.name && !detectedStudentName) detectedStudentName = matchedObj.name;
-                    if (matchedObj.rollNo && !detectedRollNo) detectedRollNo = matchedObj.rollNo;
-                    if (matchedObj.reason) reasonStr = matchedObj.reason;
-                  }
+              if (data.className && !detectedClassName) detectedClassName = data.className;
 
-                  if (data.className && !detectedClassName) detectedClassName = data.className;
-
-                  absentRecordsMap.set(dateStr, {
-                    id: `${cleanScholar}_${dateStr}`,
-                    date: dateStr,
-                    dayName: getDayName(dateStr),
-                    reason: reasonStr,
-                    session: '2026-27',
-                    markedAt: data.savedAtFormatted || data.updatedAt || new Date().toLocaleString('hi-IN'),
-                    className: data.className || '',
-                    teacherName: data.teacherName || '',
-                  });
-                }
+              absentRecordsMap.set(dateStr, {
+                id: `${cleanScholar}_${dateStr}`,
+                date: dateStr,
+                dayName: getDayName(dateStr),
+                reason: reasonStr,
+                session: '2026-27',
+                markedAt: data.savedAtFormatted || data.updatedAt || new Date().toLocaleString('hi-IN'),
+                className: data.className || '',
+                teacherName: data.teacherName || '',
               });
-            } catch (scanErr) {
-              // Ignore scan permission error
             }
-          }
-        } catch (colErr) {
-          // Ignore
+          });
+        } catch {
+          // ignore collection error
         }
       }
 
@@ -416,17 +408,18 @@ export async function getStudentAttendanceFromFirestore(
               if (!absentRecordsMap.has(rec.date)) {
                 absentRecordsMap.set(rec.date, rec);
               }
+              workingDatesSet.add(rec.date);
             });
             if (directSummary.studentName && !detectedStudentName) detectedStudentName = directSummary.studentName;
             if (directSummary.className && !detectedClassName) detectedClassName = directSummary.className;
             if (directSummary.rollNo && !detectedRollNo) detectedRollNo = directSummary.rollNo;
           }
-        } catch (docErr) {
+        } catch {
           // doc may not exist
         }
       }
 
-      if (absentRecordsMap.size > 0) {
+      if (absentRecordsMap.size > 0 || workingDatesSet.size > 0) {
         break;
       }
     } catch (err: any) {
@@ -443,14 +436,31 @@ export async function getStudentAttendanceFromFirestore(
     return timeA - timeB;
   });
 
+  const sortedWorkingDates = Array.from(workingDatesSet).sort((a, b) => {
+    const da = parseAnyDate(a);
+    const db = parseAnyDate(b);
+    return (da ? da.getTime() : 0) - (db ? db.getTime() : 0);
+  });
+
+  const totalWorkingDays = sortedWorkingDates.length;
+  const totalAbsentDays = compiledAbsentDates.length;
+  const totalPresentDays = Math.max(0, totalWorkingDays - totalAbsentDays);
+  const attendancePercentage = totalWorkingDays > 0 
+    ? ((totalPresentDays / totalWorkingDays) * 100).toFixed(1) 
+    : '100.0';
+
   const result: FirestoreStudentAttendance = {
     scholarNo: cleanScholar,
     rollNo: detectedRollNo,
     studentName: detectedStudentName,
     className: detectedClassName,
     session: '2026-27',
-    totalAbsentDays: compiledAbsentDates.length,
+    totalAbsentDays,
     absentDates: compiledAbsentDates,
+    schoolWorkingDates: sortedWorkingDates,
+    totalWorkingDays,
+    totalPresentDays,
+    attendancePercentage,
     lastUpdated: new Date().toLocaleString('hi-IN'),
     dataSource: compiledAbsentDates.length > 0 ? 'attendance_records' : 'attendance',
   };
