@@ -89,12 +89,13 @@ export function findSiblingStudents(
     return sMob === targetMob;
   });
 
-  // Ensure target student is at index 0
-  const cleanTargetSch = String(targetStudent.scholarNo || '').trim().toLowerCase();
+  // Keep a STABLE, DETERMINISTIC order by Class and Scholar Number so buttons NEVER jump around
   const sorted = [...siblings].sort((a, b) => {
-    if (String(a.scholarNo || '').trim().toLowerCase() === cleanTargetSch) return -1;
-    if (String(b.scholarNo || '').trim().toLowerCase() === cleanTargetSch) return 1;
-    return compareClassNames(a.className, b.className);
+    const classDiff = compareClassNames(a.className, b.className);
+    if (classDiff !== 0) return classDiff;
+    const aSch = parseInt(String(a.scholarNo).replace(/\D/g, ''), 10) || 0;
+    const bSch = parseInt(String(b.scholarNo).replace(/\D/g, ''), 10) || 0;
+    return aSch - bSch;
   });
 
   return sorted.length > 0 ? sorted : [targetStudent];

@@ -1,8 +1,10 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getFirestore, 
+  initializeFirestore,
   doc, 
   getDoc, 
+  getDocFromServer,
   setDoc, 
   collection, 
   query, 
@@ -19,27 +21,51 @@ import { SCHOOL_INFO } from './reportCardParser';
 // Initialize Firebase App singleton
 const app = getApps().length > 0 ? getApp() : initializeApp(config);
 
-// Support both named firestoreDatabaseId and default Firestore with automatic fallback
-let primaryDb: Firestore;
-let fallbackDb: Firestore;
-
+// Initialize Firestore targeting the provisioned database ID
+// In browser environments, enabling force long-polling prevents proxy/iframe WebSocket hangs
+let dbInstance: Firestore;
 try {
-  primaryDb = config.firestoreDatabaseId 
-    ? getFirestore(app, config.firestoreDatabaseId)
-    : getFirestore(app);
-} catch (e) {
-  console.warn('Initializing primary Firestore with custom ID failed, falling back to default:', e);
-  primaryDb = getFirestore(app);
+  dbInstance = initializeFirestore(app, {
+    experimentalForceLongPolling: typeof window !== 'undefined',
+  }, config.firestoreDatabaseId);
+} catch {
+  try {
+    dbInstance = config.firestoreDatabaseId 
+      ? getFirestore(app, config.firestoreDatabaseId)
+      : getFirestore(app);
+  } catch {
+    dbInstance = getFirestore(app);
+  }
 }
 
-try {
-  fallbackDb = getFirestore(app);
-} catch (e) {
-  fallbackDb = primaryDb;
-}
-
-export const db = primaryDb;
+export const db = dbInstance;
 export const auth = getAuth(app);
+
+/**
+ * Utility to prevent Firestore network calls from hanging indefinitely
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number = 4000): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`Firestore request timed out after ${ms}ms`));
+    }, ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
+// Connection test as required by Firebase integration guidelines
+if (typeof window !== 'undefined') {
+  (async () => {
+    try {
+      await withTimeout(getDocFromServer(doc(db, 'test', 'connection')), 2500);
+    } catch {
+      // Quietly allow offline mode without disrupting UI
+    }
+  })();
+}
 
 // Error handling types for Firestore operations
 export enum OperationType {
@@ -262,14 +288,54 @@ function normalizeAttendanceDoc(scholarNo: string, data: any): FirestoreStudentA
 }
 
 /**
+ * Normalizes class name for accurate matching between marksheet and attendance registers
+ * e.g. "12TH (COM)", "12th commerce", "12TH COM" -> "12THCOM"
+ */
+export function normalizeClassName(cls?: string): string {
+  if (!cls) return '';
+  return String(cls)
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[()]/g, '')
+    .replace(/COMMERCE/g, 'COM')
+    .replace(/MATHEMATICS/g, 'MATH')
+    .replace(/BIOLOGY/g, 'BIO')
+    .replace(/SCIENCE/g, 'SCI');
+}
+
+export function isMatchingClass(docClass?: string, targetClass?: string): boolean {
+  const normDoc = normalizeClassName(docClass);
+  const normTarget = normalizeClassName(targetClass);
+  if (!normDoc || !normTarget) return false;
+  return normDoc === normTarget || normDoc.includes(normTarget) || normTarget.includes(normDoc);
+}
+
+export function getTodayDateKey(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// In-memory cache for attendance records collection to ensure instantaneous switching between siblings
+let cachedAttendanceDocs: any[] | null = null;
+let lastAttendanceFetchTimestamp = 0;
+
+export function invalidateAttendanceCache(): void {
+  cachedAttendanceDocs = null;
+  lastAttendanceFetchTimestamp = 0;
+}
+
+/**
  * Automatically fetch student attendance from Firestore:
  * Synchronizes directly with the teacher attendance app database
- * (collections `attendance_records`, `daily_attendance`, `attendance`, `student_attendance`, `students`).
- * Also detects all school working dates for this student's class so we know when the school was open!
+ * Collection `attendance_records`
  */
 export async function getStudentAttendanceFromFirestore(
   scholarNo: string | number,
-  studentClass?: string
+  studentClass?: string,
+  forceRefresh: boolean = false
 ): Promise<FirestoreStudentAttendance | null> {
   const rawScholar = String(scholarNo ?? '').trim();
   const cleanScholar = rawScholar.toLowerCase();
@@ -278,20 +344,29 @@ export async function getStudentAttendanceFromFirestore(
   const numScholar = parseInt(cleanScholar.replace(/\D/g, ''), 10);
   const isNumeric = !isNaN(numScholar);
 
-  // Instant Cache Check: If cached locally within 10 minutes, return it immediately!
-  try {
-    const cachedRaw = localStorage.getItem(`mdhsss_firestore_att_${cleanScholar}`);
-    if (cachedRaw) {
-      const cachedParsed: FirestoreStudentAttendance = JSON.parse(cachedRaw);
-      if (cachedParsed && cachedParsed.absentDates) {
-        // Trigger background refresh without blocking user!
-        setTimeout(() => {
-          fetchFreshAttendanceFromFirestore(cleanScholar, rawScholar, numScholar, isNumeric, studentClass).catch(() => {});
-        }, 100);
-        return cachedParsed;
+  if (forceRefresh) {
+    invalidateAttendanceCache();
+    try {
+      localStorage.removeItem(`mdhsss_firestore_att_${cleanScholar}`);
+    } catch {}
+  }
+
+  // Instant Cache Check: If cached locally within current session, return immediately
+  if (!forceRefresh) {
+    try {
+      const cachedRaw = localStorage.getItem(`mdhsss_firestore_att_${cleanScholar}`);
+      if (cachedRaw) {
+        const cachedParsed: FirestoreStudentAttendance = JSON.parse(cachedRaw);
+        if (cachedParsed && Array.isArray(cachedParsed.absentDates)) {
+          // Trigger background refresh without blocking UI
+          setTimeout(() => {
+            fetchFreshAttendanceFromFirestore(cleanScholar, rawScholar, numScholar, isNumeric, studentClass).catch(() => {});
+          }, 150);
+          return cachedParsed;
+        }
       }
-    }
-  } catch {}
+    } catch {}
+  }
 
   return await fetchFreshAttendanceFromFirestore(cleanScholar, rawScholar, numScholar, isNumeric, studentClass);
 }
@@ -303,137 +378,97 @@ async function fetchFreshAttendanceFromFirestore(
   isNumeric: boolean,
   studentClass?: string
 ): Promise<FirestoreStudentAttendance | null> {
-  const databases = [primaryDb, fallbackDb];
   const absentRecordsMap = new Map<string, FirestoreAbsentRecord>();
   const workingDatesSet = new Set<string>();
+  const todayKey = getTodayDateKey();
 
   let detectedStudentName = '';
   let detectedClassName = studentClass || '';
   let detectedRollNo = '';
 
-  for (const currentDb of databases) {
-    try {
-      // -----------------------------------------------------------------------
-      // SOURCE 1: attendance_records & daily_attendance (Teacher daily registers)
-      // -----------------------------------------------------------------------
-      const targetCollections = ['attendance_records', 'daily_attendance'];
+  try {
+    const now = Date.now();
+    let recordsDataList = cachedAttendanceDocs;
 
-      for (const colName of targetCollections) {
-        try {
-          const colRef = collection(currentDb, colName);
-          const allRecordsSnap = await getDocs(colRef);
-
-          allRecordsSnap.forEach((docSnap) => {
-            const data = docSnap.data();
-            const dateStr = extractDateString(data.date || data.attendanceDate || data.markedDate || data.savedDate || docSnap.id);
-            if (!dateStr) return;
-
-            // Normalize class check
-            const docClass = String(data.className || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-            const targetClassNorm = String(detectedClassName || studentClass || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-
-            const isSameClass = !targetClassNorm || !docClass || docClass === targetClassNorm || docClass.includes(targetClassNorm) || targetClassNorm.includes(docClass);
-
-            // If any attendance record exists for this date, the school was open!
-            if (isSameClass) {
-              workingDatesSet.add(dateStr);
-            }
-
-            const nos: any[] = Array.isArray(data.absentScholarNos) ? data.absentScholarNos : [];
-            const absentsList: any[] = Array.isArray(data.absents) ? data.absents : [];
-            const recordsList: any[] = Array.isArray(data.records) ? data.records : (Array.isArray(data.students) ? data.students : []);
-
-            const isScholarInNos = nos.some((item) => matchesScholarValue(item, cleanScholar, numScholar));
-            const isScholarInAbsents = absentsList.some((item) => matchesScholarValue(item?.scholarNo || item, cleanScholar, numScholar));
-            const isScholarInRecords = recordsList.some((item) => {
-              if (matchesScholarValue(item?.scholarNo || item?.id, cleanScholar, numScholar)) {
-                const st = String(item?.status || '').trim().toLowerCase();
-                return st === 'a' || st === 'absent' || st === 'अनुपस्थित';
-              }
-              return false;
-            });
-
-            if (isScholarInNos || isScholarInAbsents || isScholarInRecords) {
-              let reasonStr = `कक्षा ${data.className || ''} - दैनिक उपस्थिति पंजी में अनुपस्थित (शिक्षक: ${data.teacherName || 'कक्षाध्यापक'})`;
-              
-              const matchedObj = absentsList.find((a: any) => matchesScholarValue(a?.scholarNo || a, cleanScholar, numScholar));
-              if (matchedObj) {
-                if (matchedObj.name && !detectedStudentName) detectedStudentName = matchedObj.name;
-                if (matchedObj.rollNo && !detectedRollNo) detectedRollNo = matchedObj.rollNo;
-                if (matchedObj.reason) reasonStr = matchedObj.reason;
-              }
-
-              if (data.className && !detectedClassName) detectedClassName = data.className;
-
-              absentRecordsMap.set(dateStr, {
-                id: `${cleanScholar}_${dateStr}`,
-                date: dateStr,
-                dayName: getDayName(dateStr),
-                reason: reasonStr,
-                session: '2026-27',
-                markedAt: data.savedAtFormatted || data.updatedAt || new Date().toLocaleString('hi-IN'),
-                className: data.className || '',
-                teacherName: data.teacherName || '',
-              });
-            }
-          });
-        } catch {
-          // ignore collection error
-        }
-      }
-
-      // -----------------------------------------------------------------------
-      // SOURCE 2: Individual documents in /attendance, /student_attendance, /students
-      // -----------------------------------------------------------------------
-      const docTargets = [
-        { col: 'attendance', id: cleanScholar },
-        { col: 'attendance', id: rawScholar },
-        { col: 'student_attendance', id: cleanScholar },
-        { col: 'students', id: cleanScholar },
-      ];
-
-      if (isNumeric) {
-        docTargets.push({ col: 'attendance', id: String(numScholar) });
-        docTargets.push({ col: 'student_attendance', id: String(numScholar) });
-        docTargets.push({ col: 'students', id: String(numScholar) });
-      }
-
-      for (const target of docTargets) {
-        try {
-          const docRef = doc(currentDb, target.col, target.id);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            const directSummary = normalizeAttendanceDoc(cleanScholar, docSnap.data());
-            directSummary.absentDates.forEach((rec) => {
-              if (!absentRecordsMap.has(rec.date)) {
-                absentRecordsMap.set(rec.date, rec);
-              }
-              workingDatesSet.add(rec.date);
-            });
-            if (directSummary.studentName && !detectedStudentName) detectedStudentName = directSummary.studentName;
-            if (directSummary.className && !detectedClassName) detectedClassName = directSummary.className;
-            if (directSummary.rollNo && !detectedRollNo) detectedRollNo = directSummary.rollNo;
-          }
-        } catch {
-          // doc may not exist
-        }
-      }
-
-      if (absentRecordsMap.size > 0 || workingDatesSet.size > 0) {
-        break;
-      }
-    } catch (err: any) {
-      console.warn('Firestore fetch attendance attempt notice:', err?.message || err);
+    // Fetch from Firestore attendance_records if cache is empty or older than 3 minutes
+    if (!recordsDataList || now - lastAttendanceFetchTimestamp > 180000) {
+      const colRef = collection(db, 'attendance_records');
+      const allRecordsSnap = await withTimeout(getDocs(colRef), 4500);
+      const list: any[] = [];
+      allRecordsSnap.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      cachedAttendanceDocs = list;
+      lastAttendanceFetchTimestamp = now;
+      recordsDataList = list;
     }
+
+    recordsDataList.forEach((data: any) => {
+      const dateStr = extractDateString(data.date || data.attendanceDate || data.markedDate || data.savedDate || data.id);
+      if (!dateStr || dateStr < '2026-10-20') return;
+
+      const isSameClass = isMatchingClass(data.className, detectedClassName || studentClass);
+
+      const nos: any[] = Array.isArray(data.absentScholarNos) ? data.absentScholarNos : [];
+      const absentsList: any[] = Array.isArray(data.absents) ? data.absents : [];
+      const presentsList: any[] = Array.isArray(data.presentScholarNos) ? data.presentScholarNos : [];
+
+      const isScholarInNos = nos.some((item) => matchesScholarValue(item, cleanScholar, numScholar));
+      const isScholarInAbsents = absentsList.some((item) => matchesScholarValue(item?.scholarNo || item, cleanScholar, numScholar));
+      const isScholarInPresents = presentsList.some((item) => matchesScholarValue(item, cleanScholar, numScholar));
+
+      // 1. If scholar is marked ABSENT in this class record
+      if (isScholarInNos || isScholarInAbsents) {
+        let reasonStr = `कक्षा ${data.className || ''} - दैनिक उपस्थिति पंजी में अनुपस्थित (शिक्षक: ${data.teacherName || 'कक्षाध्यापक'})`;
+        
+        const matchedObj = absentsList.find((a: any) => matchesScholarValue(a?.scholarNo || a, cleanScholar, numScholar));
+        if (matchedObj) {
+          if (matchedObj.name && !detectedStudentName) detectedStudentName = matchedObj.name;
+          if (matchedObj.rollNo && !detectedRollNo) detectedRollNo = matchedObj.rollNo;
+          if (matchedObj.reason) reasonStr = matchedObj.reason;
+        }
+
+        if (data.className && !detectedClassName) detectedClassName = data.className;
+
+        absentRecordsMap.set(dateStr, {
+          id: `${cleanScholar}_${dateStr}`,
+          date: dateStr,
+          dayName: getDayName(dateStr),
+          reason: reasonStr,
+          session: '2026-27',
+          markedAt: data.savedAtFormatted || data.updatedAt || new Date().toLocaleString('hi-IN'),
+          className: data.className || '',
+          teacherName: data.teacherName || '',
+        });
+
+        // Only past/today dates count towards completed working days
+        if (dateStr <= todayKey) {
+          workingDatesSet.add(dateStr);
+        }
+      } 
+      // 2. If scholar is explicitly recorded as PRESENT
+      else if (isScholarInPresents) {
+        if (data.className && !detectedClassName) detectedClassName = data.className;
+        if (dateStr <= todayKey) {
+          workingDatesSet.add(dateStr);
+        }
+      } 
+      // 3. If class attendance was taken on this date and student is not in absent list
+      else if (isSameClass) {
+        if (dateStr <= todayKey) {
+          workingDatesSet.add(dateStr);
+        }
+      }
+    });
+  } catch (err: any) {
+    console.warn('Firestore attendance_records fetch notice (using cache/offline mode):', err?.message || err);
   }
 
   // Compile absent dates sorted chronologically
   const compiledAbsentDates = Array.from(absentRecordsMap.values()).sort((a, b) => {
     const da = parseAnyDate(a.date);
     const db = parseAnyDate(b.date);
-    const timeA = da ? da.getTime() : 0;
-    const timeB = db ? db.getTime() : 0;
-    return timeA - timeB;
+    return (da ? da.getTime() : 0) - (db ? db.getTime() : 0);
   });
 
   const sortedWorkingDates = Array.from(workingDatesSet).sort((a, b) => {
@@ -443,7 +478,8 @@ async function fetchFreshAttendanceFromFirestore(
   });
 
   const totalWorkingDays = sortedWorkingDates.length;
-  const totalAbsentDays = compiledAbsentDates.length;
+  // Absent days up to today
+  const totalAbsentDays = compiledAbsentDates.filter(d => d.date <= todayKey).length;
   const totalPresentDays = Math.max(0, totalWorkingDays - totalAbsentDays);
   const attendancePercentage = totalWorkingDays > 0 
     ? ((totalPresentDays / totalWorkingDays) * 100).toFixed(1) 
@@ -462,10 +498,9 @@ async function fetchFreshAttendanceFromFirestore(
     totalPresentDays,
     attendancePercentage,
     lastUpdated: new Date().toLocaleString('hi-IN'),
-    dataSource: compiledAbsentDates.length > 0 ? 'attendance_records' : 'attendance',
+    dataSource: 'attendance_records',
   };
 
-  // Cache locally for offline and instant retrieval
   try {
     localStorage.setItem(`mdhsss_firestore_att_${cleanScholar}`, JSON.stringify(result));
   } catch {}
@@ -490,7 +525,7 @@ export function subscribeToStudentAttendance(
   try {
     // 1. Listen to attendance_records matching this scholar number
     const q = query(
-      collection(primaryDb, 'attendance_records'),
+      collection(db, 'attendance_records'),
       where('absentScholarNos', 'array-contains', cleanScholar)
     );
 
@@ -501,17 +536,21 @@ export function subscribeToStudentAttendance(
         if (fresh) onUpdate(fresh);
       },
       (error) => {
+        // If client is offline or backend unreachable, Firestore operates in offline mode
+        if (error?.message?.includes('offline') || error?.code === 'unavailable' || error?.message?.includes('backend')) {
+          return;
+        }
         handleFirestoreError(error, OperationType.GET, 'attendance_records');
       }
     );
     unsubs.push(unsubRecords);
   } catch (err) {
-    console.warn('Unable to bind attendance_records listener:', err);
+    console.warn('Notice: Unable to bind attendance_records listener (offline mode):', err);
   }
 
   try {
     // 2. Also listen to direct /attendance/{cleanScholar}
-    const docRef = doc(primaryDb, 'attendance', cleanScholar);
+    const docRef = doc(db, 'attendance', cleanScholar);
     const unsubDoc = onSnapshot(
       docRef,
       async (snap) => {
@@ -520,12 +559,12 @@ export function subscribeToStudentAttendance(
           if (fresh) onUpdate(fresh);
         }
       },
-      (error) => {
-        // Silent error for optional single doc
+      () => {
+        // Silent error for optional single doc / offline
       }
     );
     unsubs.push(unsubDoc);
-  } catch (err) {}
+  } catch {}
 
   return () => {
     unsubs.forEach((unsub) => {
@@ -582,13 +621,9 @@ export async function addStudentAbsentDateToFirestore(
 
   // Save to Firestore /attendance/{cleanScholar}
   try {
-    await setDoc(doc(primaryDb, 'attendance', cleanScholar), updatedPayload);
+    await withTimeout(setDoc(doc(db, 'attendance', cleanScholar), updatedPayload), 4000);
   } catch (err: any) {
-    try {
-      await setDoc(doc(fallbackDb, 'attendance', cleanScholar), updatedPayload);
-    } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, `attendance/${cleanScholar}`);
-    }
+    handleFirestoreError(err, OperationType.WRITE, `attendance/${cleanScholar}`);
   }
 
   // Also cache locally
@@ -627,13 +662,9 @@ export async function removeStudentAbsentDateFromFirestore(
   };
 
   try {
-    await setDoc(doc(primaryDb, 'attendance', cleanScholar), updatedPayload);
+    await withTimeout(setDoc(doc(db, 'attendance', cleanScholar), updatedPayload), 4000);
   } catch (err) {
-    try {
-      await setDoc(doc(fallbackDb, 'attendance', cleanScholar), updatedPayload);
-    } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, `attendance/${cleanScholar}`);
-    }
+    handleFirestoreError(err, OperationType.WRITE, `attendance/${cleanScholar}`);
   }
 
   try {

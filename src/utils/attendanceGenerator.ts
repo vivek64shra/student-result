@@ -184,12 +184,12 @@ export function getStudentAbsenteeSummary(student: ParsedStudent): StudentAbsent
   };
 }
 
-// Fetch live attendance data asynchronously from Firebase Cloud Firestore using ONLY scholar number
-export async function fetchLiveStudentAttendance(student: ParsedStudent): Promise<StudentAbsenteeSummary> {
+// Fetch live attendance data asynchronously from Firebase Cloud Firestore using scholar number & class
+export async function fetchLiveStudentAttendance(student: ParsedStudent, forceRefresh: boolean = false): Promise<StudentAbsenteeSummary> {
   const cleanScholar = String(student.scholarNo ?? '').trim().toLowerCase();
   
   try {
-    const cloudData = await getStudentAttendanceFromFirestore(cleanScholar, student.className);
+    const cloudData = await getStudentAttendanceFromFirestore(cleanScholar, student.className, forceRefresh);
     if (cloudData) {
       const totalAbsentDays = cloudData.absentDates.length;
       return {

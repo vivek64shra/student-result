@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Calendar, 
   Printer, 
@@ -22,7 +22,9 @@ import {
   CheckCircle2,
   XCircle,
   Sun,
-  CalendarCheck
+  CalendarCheck,
+  RefreshCw,
+  Sparkles
 } from 'lucide-react';
 import { ParsedStudent, SCHOOL_INFO, SCHOOL_LOGO_URL } from '../utils/reportCardParser';
 import { 
@@ -32,8 +34,15 @@ import {
   AbsentDateRecord,
   CURRENT_SESSION 
 } from '../utils/attendanceGenerator';
-import { parseAnyDate } from '../utils/firebase';
+import { parseAnyDate, getTodayDateKey } from '../utils/firebase';
 import { downloadElementAsJpg, shareElementAsJpg } from '../utils/imageExporter';
+import { 
+  ACADEMIC_CALENDAR_MONTHS, 
+  isDateInAcademicRange, 
+  getSchoolHolidayInfo, 
+  CALENDAR_START_DATE, 
+  CALENDAR_END_DATE 
+} from '../utils/mpSchoolHolidays';
 
 interface StudentAttendanceViewProps {
   student: ParsedStudent;
@@ -42,20 +51,6 @@ interface StudentAttendanceViewProps {
   lastUpdated?: string;
   isAdmin?: boolean;
 }
-
-// Academic session months for session 2026-27 (जुलाई 2026 से अप्रैल 2027)
-const SESSION_MONTHS = [
-  { id: '2026-07', name: 'जुलाई 2026', shortName: 'जुलाई', year: 2026, month: 7 },
-  { id: '2026-08', name: 'अगस्त 2026', shortName: 'अगस्त', year: 2026, month: 8 },
-  { id: '2026-09', name: 'सितम्बर 2026', shortName: 'सितम्बर', year: 2026, month: 9 },
-  { id: '2026-10', name: 'अक्टूबर 2026', shortName: 'अक्टूबर', year: 2026, month: 10 },
-  { id: '2026-11', name: 'नवम्बर 2026', shortName: 'नवम्बर', year: 2026, month: 11 },
-  { id: '2026-12', name: 'दिसम्बर 2026', shortName: 'दिसम्बर', year: 2026, month: 12 },
-  { id: '2027-01', name: 'जनवरी 2027', shortName: 'जनवरी', year: 2027, month: 1 },
-  { id: '2027-02', name: 'फ़रवरी 2027', shortName: 'फ़रवरी', year: 2027, month: 2 },
-  { id: '2027-03', name: 'मार्च 2027', shortName: 'मार्च', year: 2027, month: 3 },
-  { id: '2027-04', name: 'अप्रैल 2027', shortName: 'अप्रैल', year: 2027, month: 4 },
-];
 
 const WEEKDAY_NAMES = [
   { short: 'रवि', full: 'रविवार', isWeekend: true },
@@ -77,6 +72,23 @@ function toDateKey(dateVal: any): string | null {
   return `${y}-${m}-${day}`;
 }
 
+// Filter records to the valid range starting from 20-Oct-2026 to 01-Jan-2028 (Delete anything prior)
+function filterToValidAcademicWindow(records: AbsentDateRecord[]): AbsentDateRecord[] {
+  if (!Array.isArray(records)) return [];
+  return records.filter((r) => {
+    const k = toDateKey(r.date);
+    return k && isDateInAcademicRange(k);
+  });
+}
+
+function filterWorkingDatesToWindow(dates?: string[]): string[] {
+  if (!Array.isArray(dates)) return [];
+  return dates.filter((d) => {
+    const k = toDateKey(d);
+    return k && isDateInAcademicRange(k);
+  });
+}
+
 export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
   student,
   onBack,
@@ -84,9 +96,21 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
   lastUpdated = '12-Oct-2026',
   isAdmin = false,
 }) => {
-  const [summary, setSummary] = useState(() => getStudentAbsenteeSummary(student));
+  const [summary, setSummary] = useState(() => {
+    const initial = getStudentAbsenteeSummary(student);
+    const validAbsents = filterToValidAcademicWindow(initial.absentDates);
+    return {
+      ...initial,
+      absentDates: validAbsents,
+      totalAbsentDays: validAbsents.length,
+      schoolWorkingDates: filterWorkingDatesToWindow(initial.schoolWorkingDates),
+    };
+  });
+
   const [isDownloadingJpg, setIsDownloadingJpg] = useState(false);
   const [isSharingWhatsApp, setIsSharingWhatsApp] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
 
   // View Modes: 'calendar' (New Monthly Calendar) | 'datewise' | 'monthwise' | 'monthdrill'
   const [viewMode, setViewMode] = useState<'calendar' | 'datewise' | 'monthwise' | 'monthdrill'>('calendar');
@@ -94,7 +118,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
   const [selectedDayDetail, setSelectedDayDetail] = useState<{
     dateStr: string;
     dayName: string;
-    status: 'present' | 'absent' | 'holiday' | 'sunday';
+    status: 'present' | 'absent' | 'holiday' | 'sunday' | 'upcoming';
     reason?: string;
   } | null>(null);
 
@@ -102,7 +126,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
   const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>('all');
   const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({
     '2026-10': true,
-    '2026-09': true,
+    '2026-11': true,
   });
 
   // Background fetch attendance using scholar number strictly + live updates
@@ -112,13 +136,20 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
     fetchLiveStudentAttendance(student)
       .then((res) => {
         if (isMounted && res) {
-          setSummary(res);
+          const validAbsents = filterToValidAcademicWindow(res.absentDates);
+          setSummary({
+            ...res,
+            absentDates: validAbsents,
+            totalAbsentDays: validAbsents.length,
+            schoolWorkingDates: filterWorkingDatesToWindow(res.schoolWorkingDates),
+          });
         }
       })
       .catch(() => {});
 
     const unsubscribe = subscribeToStudentAttendance(student.scholarNo, (updated) => {
       if (isMounted && updated) {
+        const validAbsents = filterToValidAcademicWindow(updated.absentDates);
         setSummary({
           scholarNo: student.scholarNo,
           rollNo: student.rollNo,
@@ -126,10 +157,10 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
           fatherName: student.fatherName,
           className: student.className,
           academicSession: CURRENT_SESSION,
-          absentDates: updated.absentDates,
-          totalAbsentDays: updated.totalAbsentDays,
-          hasAbsenceRecorded: updated.totalAbsentDays > 0,
-          schoolWorkingDates: updated.schoolWorkingDates || [],
+          absentDates: validAbsents,
+          totalAbsentDays: validAbsents.length,
+          hasAbsenceRecorded: validAbsents.length > 0,
+          schoolWorkingDates: filterWorkingDatesToWindow(updated.schoolWorkingDates),
           totalWorkingDays: updated.totalWorkingDays || 0,
           totalPresentDays: updated.totalPresentDays || 0,
           attendancePercentage: updated.attendancePercentage || '100.0',
@@ -143,6 +174,30 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
       unsubscribe();
     };
   }, [student.scholarNo]);
+
+  // Refresh Attendance Data manually (forces fresh Firestore pull)
+  const handleRefreshAttendance = useCallback(async () => {
+    setIsRefreshing(true);
+    setRefreshMsg(null);
+    try {
+      const res = await fetchLiveStudentAttendance(student, true);
+      if (res) {
+        const validAbsents = filterToValidAcademicWindow(res.absentDates);
+        setSummary({
+          ...res,
+          absentDates: validAbsents,
+          totalAbsentDays: validAbsents.length,
+          schoolWorkingDates: filterWorkingDatesToWindow(res.schoolWorkingDates),
+        });
+        setRefreshMsg('✓ उपस्थिति डेटा नवीनतम अपडेट हो गया!');
+        setTimeout(() => setRefreshMsg(null), 3000);
+      }
+    } catch (err) {
+      console.warn('Manual attendance refresh error:', err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [student]);
 
   const handlePrint = () => {
     window.print();
@@ -164,7 +219,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
     if (summary.absentDates.length > 0) {
       absentDatesText = summary.absentDates.map((d, i) => `${i + 1}. दिनांक: ${d.date} (${d.dayName}) - ${d.reason}`).join('\n');
     } else {
-      absentDatesText = 'वर्तमान सत्र में कोई अनुपस्थिति दर्ज नहीं है (0 दिन)। विद्यार्थी नियमित उपस्थित है।';
+      absentDatesText = '20 अक्टूबर 2026 से अब तक कोई अनुपस्थिति दर्ज नहीं है (0 दिन)। विद्यार्थी नियमित उपस्थित है।';
     }
 
     const shareText = 
@@ -174,7 +229,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
       `🟢 उपस्थित दिन: ${summary.totalPresentDays || 'नियमित'}\n` +
       `🔴 अनुपस्थित दिन: ${summary.totalAbsentDays}\n` +
       `📊 उपस्थिति दर: ${summary.attendancePercentage || '100'}%\n\n` +
-      `अनुपस्थिति विवरण:\n${absentDatesText}\n\n` +
+      `अनुपस्थिति विवरण (20/10/2026 से):\n${absentDatesText}\n\n` +
       `${SCHOOL_INFO.schoolName}`;
 
     await shareElementAsJpg(
@@ -197,7 +252,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
 
   const getRecordMonthName = (dateStr: string): string => {
     const monthId = getRecordMonthId(dateStr);
-    const found = SESSION_MONTHS.find((m) => m.id === monthId);
+    const found = ACADEMIC_CALENDAR_MONTHS.find((m) => m.id === monthId);
     if (found) return found.name;
     const d = parseAnyDate(dateStr);
     if (d && !isNaN(d.getTime())) {
@@ -212,7 +267,9 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
     const aMap = new Map<string, AbsentDateRecord>();
     summary.absentDates.forEach((rec) => {
       const k = toDateKey(rec.date);
-      if (k) aMap.set(k, rec);
+      if (k && isDateInAcademicRange(k)) {
+        aMap.set(k, rec);
+      }
     });
 
     const wSet = new Set<string>();
@@ -220,7 +277,9 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
     if (Array.isArray(summary.schoolWorkingDates)) {
       summary.schoolWorkingDates.forEach((d) => {
         const k = toDateKey(d);
-        if (k) wSet.add(k);
+        if (k && isDateInAcademicRange(k)) {
+          wSet.add(k);
+        }
       });
     }
     // Also include any date this student was absent as a school working date
@@ -229,11 +288,11 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
     return { absentMap: aMap, workingDateKeysSet: wSet };
   }, [summary.absentDates, summary.schoolWorkingDates]);
 
-  // Group absences by Academic Session Month
+  // Group absences by Academic Session Month (October 2026 to January 2028)
   const monthWiseGroups = useMemo(() => {
-    const map = new Map<string, { monthInfo: typeof SESSION_MONTHS[0]; records: AbsentDateRecord[] }>();
+    const map = new Map<string, { monthInfo: typeof ACADEMIC_CALENDAR_MONTHS[0]; records: AbsentDateRecord[] }>();
 
-    SESSION_MONTHS.forEach((m) => {
+    ACADEMIC_CALENDAR_MONTHS.forEach((m) => {
       map.set(m.id, { monthInfo: m, records: [] });
     });
 
@@ -241,15 +300,6 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
       const mId = getRecordMonthId(rec.date);
       if (map.has(mId)) {
         map.get(mId)!.records.push(rec);
-      } else {
-        const dynamicMonth = {
-          id: mId,
-          name: getRecordMonthName(rec.date),
-          shortName: getRecordMonthName(rec.date).split(' ')[0],
-          year: parseAnyDate(rec.date)?.getFullYear() || 2026,
-          month: (parseAnyDate(rec.date)?.getMonth() || 0) + 1,
-        };
-        map.set(mId, { monthInfo: dynamicMonth, records: [rec] });
       }
     });
 
@@ -287,24 +337,32 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
   }, [summary.absentDates, searchFilter, selectedMonthFilter]);
 
   // =========================================================================
-  // CALENDAR COMPUTATION LOGIC FOR CURRENT SELECTED MONTH
+  // CALENDAR COMPUTATION LOGIC FOR CURRENT SELECTED MONTH (20/10/2026 to 01/01/2028)
   // =========================================================================
   const calendarData = useMemo(() => {
-    const currentMonthObj = SESSION_MONTHS.find((m) => m.id === selectedCalendarMonthId) || SESSION_MONTHS[3]; // Oct 2026 default
+    const currentMonthObj = ACADEMIC_CALENDAR_MONTHS.find((m) => m.id === selectedCalendarMonthId) || ACADEMIC_CALENDAR_MONTHS[0]; // Oct 2026 default
     const year = currentMonthObj.year;
     const month = currentMonthObj.month; // 1-12
     const daysInMonth = new Date(year, month, 0).getDate();
-    const firstDayWeekday = new Date(year, month - 1, 1).getDay(); // 0 = Sun
+    
+    // In October 2026, calendar strictly starts on 20 October 2026 as requested!
+    const startDay = currentMonthObj.startDay || 1;
+    const endDay = currentMonthObj.endDay || daysInMonth;
+
+    // Weekday of the first displayed day
+    const firstDayWeekday = new Date(year, month - 1, startDay).getDay(); // 0 = Sun
+    const todayKey = getTodayDateKey();
 
     let workingDaysCount = 0;
     let presentDaysCount = 0;
     let absentDaysCount = 0;
     let holidayDaysCount = 0;
     let sundayDaysCount = 0;
+    let upcomingDaysCount = 0;
 
     const days = [];
 
-    for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
+    for (let dayNum = startDay; dayNum <= endDay; dayNum++) {
       const dayDate = new Date(year, month - 1, dayNum);
       const dateKey = `${year}-${String(month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
       const dayOfWeek = dayDate.getDay();
@@ -313,29 +371,42 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
       const dateDisplay = `${String(dayNum).padStart(2, '0')}-${currentMonthObj.shortName}-${year}`;
       const dayName = WEEKDAY_NAMES[dayOfWeek].full;
 
-      let status: 'present' | 'absent' | 'holiday' | 'sunday' = 'holiday';
+      let status: 'present' | 'absent' | 'holiday' | 'sunday' | 'upcoming' = 'holiday';
       let reason = '';
+      const holidayDetails = getSchoolHolidayInfo(dateKey);
 
+      // Check conditions in prioritized order:
       if (isSunday) {
         status = 'sunday';
         sundayDaysCount++;
-        reason = 'साप्ताहिक अवकाश (रविवार)';
+        reason = holidayDetails ? `${holidayDetails.name} (रविवार)` : 'साप्ताहिक अवकाश (रविवार)';
       } else if (absentMap.has(dateKey)) {
+        // Explicitly absent in class attendance register
         status = 'absent';
         absentDaysCount++;
         workingDaysCount++;
-        reason = absentMap.get(dateKey)?.reason || 'अनुपस्थित (बिना पूर्व सूचना)';
+        reason = absentMap.get(dateKey)?.reason || 'कक्षा दैनिक उपस्थिति पंजी में अनुपस्थित दर्ज';
       } else if (workingDateKeysSet.has(dateKey)) {
-        // School was open on this date (records exist in class register) and this child is not absent
+        // Explicit working day and student is not absent -> present
         status = 'present';
         presentDaysCount++;
         workingDaysCount++;
-        reason = 'विद्यार्थी कक्षा में नियमित उपस्थित था';
-      } else {
-        // No attendance recorded on this date -> official holiday or festival
+        reason = 'कक्षा में नियमित उपस्थित था';
+      } else if (holidayDetails) {
+        // Authentic MP School Education / Central Govt Holiday
         status = 'holiday';
         holidayDaysCount++;
-        reason = 'विद्यालय अवकाश (Holiday) / कार्य दिवस नहीं';
+        reason = `${holidayDetails.name} • ${holidayDetails.description}`;
+      } else if (dateKey > todayKey) {
+        // CRITICAL FIX: Future dates are strictly UPCOMING, NOT present!
+        status = 'upcoming';
+        upcomingDaysCount++;
+        reason = 'आगामी शैक्षणिक कार्य दिवस (कक्षा संचालित होने पर उपस्थिति दर्ज होगी)';
+      } else {
+        // Past date with no school session recorded (school holiday / closed)
+        status = 'holiday';
+        holidayDaysCount++;
+        reason = 'इस दिवस विद्यालय बंद / अवकाश था अथवा उपस्थिति दर्ज नहीं की गई थी';
       }
 
       days.push({
@@ -347,6 +418,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
         status,
         reason,
         isSunday,
+        holidayDetails,
       });
     }
 
@@ -356,6 +428,8 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
 
     return {
       monthObj: currentMonthObj,
+      startDay,
+      endDay,
       daysInMonth,
       firstDayWeekday,
       days,
@@ -364,6 +438,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
       absentDaysCount,
       holidayDaysCount,
       sundayDaysCount,
+      upcomingDaysCount,
       attendanceRate,
       hasRecordsThisMonth: workingDaysCount > 0,
     };
@@ -377,27 +452,27 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
   };
 
   const handlePrevMonth = () => {
-    const idx = SESSION_MONTHS.findIndex((m) => m.id === selectedCalendarMonthId);
+    const idx = ACADEMIC_CALENDAR_MONTHS.findIndex((m) => m.id === selectedCalendarMonthId);
     if (idx > 0) {
-      setSelectedCalendarMonthId(SESSION_MONTHS[idx - 1].id);
+      setSelectedCalendarMonthId(ACADEMIC_CALENDAR_MONTHS[idx - 1].id);
       setSelectedDayDetail(null);
     }
   };
 
   const handleNextMonth = () => {
-    const idx = SESSION_MONTHS.findIndex((m) => m.id === selectedCalendarMonthId);
-    if (idx >= 0 && idx < SESSION_MONTHS.length - 1) {
-      setSelectedCalendarMonthId(SESSION_MONTHS[idx + 1].id);
+    const idx = ACADEMIC_CALENDAR_MONTHS.findIndex((m) => m.id === selectedCalendarMonthId);
+    if (idx >= 0 && idx < ACADEMIC_CALENDAR_MONTHS.length - 1) {
+      setSelectedCalendarMonthId(ACADEMIC_CALENDAR_MONTHS[idx + 1].id);
       setSelectedDayDetail(null);
     }
   };
 
   return (
-    <div className="max-w-[960px] mx-auto pb-12">
+    <div className="max-w-[980px] mx-auto pb-12">
       
-      {/* Top Action Bar (Hidden in Print) */}
+      {/* Top Action Bar (Clean & Focused on Navigation + Quick Reload) */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 mb-4 print:hidden">
-        <div>
+        <div className="flex items-center gap-2">
           {onBack && (
             <button
               type="button"
@@ -408,51 +483,25 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
               <span>← मुख्य विकल्प</span>
             </button>
           )}
+
+          {/* Refresh / Reload Button as requested */}
+          <button
+            type="button"
+            onClick={handleRefreshAttendance}
+            disabled={isRefreshing}
+            className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-300 font-extrabold text-xs sm:text-sm rounded-xl shadow-2xs flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-60"
+            title="नवीनतम उपस्थिति डेटा पुनः लोड करें"
+          >
+            <RefreshCw className={`w-4 h-4 text-blue-700 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>{isRefreshing ? 'रिफ्रेश हो रहा है...' : '🔄 डेटा पुनः लोड करें (Refresh)'}</span>
+          </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="px-3.5 sm:px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
-          >
-            <Printer className="w-4 h-4" />
-            <span>प्रिंट विवरण (A4)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleDownloadJpg}
-            disabled={isDownloadingJpg}
-            className="px-3.5 sm:px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
-            title="उपस्थिति एवं अनुपस्थिति विवरण को A4 JPG फोटो फॉर्मेट में सीधे डाउनलोड करें"
-          >
-            <Download className="w-4 h-4" />
-            <span>{isDownloadingJpg ? 'JPG बन रहा है...' : 'JPG डाउनलोड (A4)'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleWhatsAppShare}
-            disabled={isSharingWhatsApp}
-            className="px-3.5 py-2 bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
-            title="उपस्थिति विवरण WhatsApp पर भेजें"
-          >
-            <Share2 className="w-4 h-4" />
-            <span>{isSharingWhatsApp ? 'शेयर हो रहा है...' : 'WhatsApp शेयर'}</span>
-          </button>
-
-          {onLogout && (
-            <button
-              type="button"
-              onClick={onLogout}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <LogOut className="w-4 h-4 text-red-400" />
-              <span>लॉगआउट</span>
-            </button>
-          )}
-        </div>
+        {refreshMsg && (
+          <div className="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 px-3 py-1.5 rounded-xl animate-fadeIn">
+            {refreshMsg}
+          </div>
+        )}
       </div>
 
       {/* Interactive Advanced View Switcher Tabs (Hidden in Print) */}
@@ -468,7 +517,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
             }`}
           >
             <CalendarCheck className="w-4 h-4" />
-            <span>1. 📅 मासिक कैलेंडर दृश्य (उपस्थित / अनुपस्थित / अवकाश)</span>
+            <span>1. 📅 मासिक उपस्थिति कैलेंडर (20/10/2026 से 01/01/2028)</span>
           </button>
 
           <button
@@ -513,7 +562,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
 
         {/* View mode indicator */}
         <div className="flex items-center gap-2 text-[11px] text-slate-600 font-semibold px-2">
-          <span>उपस्थिति:</span>
+          <span>उपस्थिति दर:</span>
           <b className="text-emerald-700 font-mono text-sm">
             {summary.attendancePercentage ? `${summary.attendancePercentage}%` : '100%'}
           </b>
@@ -542,12 +591,12 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
               onChange={(e) => setSelectedMonthFilter(e.target.value)}
               className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-800 outline-none cursor-pointer"
             >
-              <option value="all">सभी माह (सत्र 2026-27)</option>
-              {SESSION_MONTHS.map((m) => {
+              <option value="all">सभी 16 माह (20/10/2026 से 01/01/2028)</option>
+              {ACADEMIC_CALENDAR_MONTHS.map((m) => {
                 const count = summary.absentDates.filter((r) => getRecordMonthId(r.date) === m.id).length;
                 return (
                   <option key={m.id} value={m.id}>
-                    {m.name} {count > 0 ? `(${count} दिन अनुपस्थित)` : '(उपलब्ध नहीं / अवकाश)'}
+                    {m.name} {count > 0 ? `(${count} दिन अनुपस्थित)` : '(0 अनुपस्थिति)'}
                   </option>
                 );
               })}
@@ -603,7 +652,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
               छात्र उपस्थिति एवं अनुपस्थिति अभिलेख पत्रक (OFFICIAL ATTENDANCE LOG)
             </div>
             <span className="text-[10px] sm:text-xs font-bold text-slate-600 mt-0.5">
-              शैक्षणिक सत्र: <b>{summary.academicSession}</b> | अद्यतन: <b>{lastUpdated}</b>
+              कैलेंडर अवधि: <b>20 अक्टूबर 2026 से 1 जनवरी 2028 (1.5 वर्ष)</b> | अद्यतन: <b>{lastUpdated}</b>
             </span>
           </div>
         </div>
@@ -643,7 +692,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
               {summary.totalPresentDays && summary.totalPresentDays > 0 ? summary.totalPresentDays : 'नियमित'}
             </div>
             <span className="text-[9.5px] text-emerald-700 font-semibold">
-              सत्र 2026-27
+              20/10/2026 से प्रभावी
             </span>
           </div>
 
@@ -672,7 +721,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
             <div className="text-xl sm:text-3xl font-black text-blue-950 font-mono my-0.5">
               {summary.totalWorkingDays && summary.totalWorkingDays > 0 ? summary.totalWorkingDays : (summary.totalAbsentDays > 0 ? `${summary.totalAbsentDays}+` : 'अभिलेख अनुसार')}
             </div>
-            <span className="text-[9.5px] text-blue-700 font-semibold">सत्र 2026-27</span>
+            <span className="text-[9.5px] text-blue-700 font-semibold">20/10/2026 से 01/01/2028</span>
           </div>
 
           <div className="p-3 rounded-xl border-2 border-indigo-300 bg-indigo-50/70 text-center flex flex-col justify-center">
@@ -687,11 +736,11 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
           </div>
         </div>
 
-        {/* Policy & Holiday Notice (As per user's requirement: absent in class = school open; absent = child missing; not in absent = present; no entries = holiday) */}
+        {/* Policy & Holiday Notice (With MP & Central Holiday integration) */}
         <div className="mb-3.5 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 text-[11px] relative z-10 flex items-start gap-2 print:border-black">
           <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5 print:hidden" />
           <p className="leading-relaxed">
-            <b>उपस्थिति एवं अवकाश नियम:</b> जिस तिथि को कक्षा में किसी भी विद्यार्थी की अनुपस्थिति दर्ज हुई है, उस दिन विद्यालय खुला माना गया है तथा अनुपस्थित सूची में नाम न होने पर विद्यार्थी <b>उपस्थित (🟢)</b> रहा है। जिस तिथि पर कोई अभिलेख नहीं है, उसे <b>विद्यालय अवकाश (🟡 Holiday / Sunday)</b> मान्य किया गया है।
+            <b>अवकाश एवं उपस्थिति नियम (20 अक्टूबर 2026 से 1 जनवरी 2028):</b> मध्य प्रदेश स्कूल शिक्षा विभाग एवं केंद्रीय शासन द्वारा घोषित समस्त राष्ट्रीय पर्व, त्योहार एवं ग्रीष्मकालीन/शीतकालीन अवकाश कैलेंडर में स्वतः दर्ज हैं। जिस कार्य दिवस में विद्यार्थी अनुपस्थित नहीं रहा है, उसे <b>🟢 उपस्थित (Present)</b> मान्य किया गया है।
           </p>
         </div>
 
@@ -715,11 +764,16 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
 
                 <div className="text-center">
                   <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                    शैक्षणिक सत्र 2026-27 • मासिक उपस्थिति कैलेंडर
+                    म.प्र. एवं केंद्रीय अवकाश आधारित कैलेंडर (20/10/2026 से 01/01/2028)
                   </span>
                   <h3 className="text-base sm:text-xl font-black text-slate-900 flex items-center justify-center gap-1.5">
                     <CalendarCheck className="w-5 h-5 text-emerald-600" />
                     <span>{calendarData.monthObj.name}</span>
+                    {calendarData.monthObj.id === '2026-10' && (
+                      <span className="text-[11px] bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md font-bold">
+                        (20 से 31 अक्टूबर)
+                      </span>
+                    )}
                   </h3>
                 </div>
 
@@ -733,9 +787,9 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                 </button>
               </div>
 
-              {/* Month Pills selector */}
+              {/* Month Pills selector (16 Months, 1.5 Years) */}
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
-                {SESSION_MONTHS.map((m) => {
+                {ACADEMIC_CALENDAR_MONTHS.map((m) => {
                   const isSel = m.id === selectedCalendarMonthId;
                   const absCount = summary.absentDates.filter((r) => getRecordMonthId(r.date) === m.id).length;
                   return (
@@ -800,18 +854,11 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
               </div>
             </div>
 
-            {/* If whole month has 0 recorded attendance (as requested by user) */}
+            {/* Informational banner if month has no attendance recorded or is future */}
             {!calendarData.hasRecordsThisMonth && (
-              <div className="mb-3.5 p-3.5 bg-amber-50/90 border-2 border-amber-300 rounded-xl flex items-center gap-2.5 text-amber-950">
-                <AlertCircle className="w-5 h-5 text-amber-700 shrink-0" />
-                <div className="text-xs sm:text-sm">
-                  <strong className="block font-black">
-                    यह सुविधा इस महीने उपलब्ध नहीं थी। असुविधा के लिए खेद है।
-                  </strong>
-                  <span className="text-[11px] text-amber-900 font-medium">
-                    (सत्र {summary.academicSession} में <b>{calendarData.monthObj.name}</b> माह का उपस्थिति रजिस्टर संधारित नहीं है अथवा विद्यालय अवकाश मान्य है)
-                  </span>
-                </div>
+              <div className="mb-3 p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs font-semibold flex items-center gap-2">
+                <Info className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>इस माह में विद्यालय उपस्थिति पंजी दर्ज नहीं है / यह सुविधा इस माह उपलब्ध नहीं थी। असुविधा के लिए खेद है।</span>
               </div>
             )}
 
@@ -831,12 +878,12 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
               {/* Day Cells Grid */}
               <div className="grid grid-cols-7 gap-1 p-2 bg-slate-100/60">
                 
-                {/* Empty Offset cells before day 1 */}
+                {/* Empty Offset cells before the start day */}
                 {Array.from({ length: calendarData.firstDayWeekday }).map((_, i) => (
                   <div key={`empty-${i}`} className="min-h-[58px] sm:min-h-[72px] rounded-xl bg-transparent opacity-30" />
                 ))}
 
-                {/* Day cells 1 to daysInMonth */}
+                {/* Day cells from startDay to endDay */}
                 {calendarData.days.map((day) => {
                   const isSelected = selectedDayDetail?.dateStr === day.dateKey;
                   
@@ -865,12 +912,19 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                         ⚪ रविवार
                       </span>
                     );
+                  } else if (day.status === 'upcoming') {
+                    cellClasses = 'bg-slate-50/70 border border-slate-200 text-slate-400 hover:bg-slate-100/80';
+                    badge = (
+                      <span className="px-1 sm:px-1.5 py-0.2 rounded font-semibold text-[9px] sm:text-[10px] bg-slate-200/80 text-slate-600 block truncate">
+                        ⏳ आगामी
+                      </span>
+                    );
                   } else {
                     // Holiday
-                    cellClasses = 'bg-amber-50/70 border border-amber-200 text-amber-950 hover:bg-amber-100/70';
+                    cellClasses = 'bg-amber-50/70 border border-amber-300 text-amber-950 hover:bg-amber-100/70';
                     badge = (
-                      <span className="px-1 sm:px-1.5 py-0.2 rounded font-bold text-[9px] sm:text-[10px] bg-amber-100 text-amber-800 border border-amber-300 block truncate">
-                        🟡 अवकाश
+                      <span className="px-1 sm:px-1.5 py-0.2 rounded font-bold text-[9px] sm:text-[10px] bg-amber-100 text-amber-900 border border-amber-300 block truncate" title={day.holidayDetails?.name || 'अवकाश'}>
+                        🟡 {day.holidayDetails ? day.holidayDetails.name.slice(0, 10) : 'अवकाश'}
                       </span>
                     );
                   }
@@ -891,7 +945,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                     >
                       <div className="flex items-center justify-between">
                         <span className={`text-xs sm:text-sm font-black font-mono ${
-                          day.isSunday ? 'text-amber-700' : 'text-slate-900'
+                          day.isSunday ? 'text-amber-700' : (day.status === 'upcoming' ? 'text-slate-400' : 'text-slate-900')
                         }`}>
                           {day.dayNum}
                         </span>
@@ -900,6 +954,12 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                         )}
                         {day.status === 'present' && (
                           <span className="w-2 h-2 rounded-full bg-emerald-600" />
+                        )}
+                        {day.status === 'upcoming' && (
+                          <span className="text-[10px] text-slate-400">⏳</span>
+                        )}
+                        {day.holidayDetails && (
+                          <span className="text-[10px]">✨</span>
                         )}
                       </div>
 
@@ -924,11 +984,15 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className="w-3.5 h-3.5 rounded-md bg-amber-400 inline-block shadow-2xs" />
-                    <span>🟡 विद्यालय अवकाश (Holiday)</span>
+                    <span>🟡 म.प्र./केंद्रीय अवकाश (Holiday)</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className="w-3.5 h-3.5 rounded-md bg-slate-300 inline-block shadow-2xs" />
                     <span>⚪ रविवार (Sunday)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3.5 h-3.5 rounded-md bg-slate-200 border border-slate-300 inline-block shadow-2xs" />
+                    <span>⏳ आगामी कार्य दिवस (Upcoming)</span>
                   </div>
                 </div>
 
@@ -945,7 +1009,8 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-white shrink-0 ${
                     selectedDayDetail.status === 'present' ? 'bg-emerald-600' :
                     selectedDayDetail.status === 'absent' ? 'bg-red-600' :
-                    selectedDayDetail.status === 'sunday' ? 'bg-slate-600' : 'bg-amber-500'
+                    selectedDayDetail.status === 'sunday' ? 'bg-slate-600' :
+                    selectedDayDetail.status === 'upcoming' ? 'bg-slate-500' : 'bg-amber-500'
                   }`}>
                     {selectedDayDetail.status === 'present' ? <CheckCircle2 className="w-5 h-5" /> :
                      selectedDayDetail.status === 'absent' ? <XCircle className="w-5 h-5" /> :
@@ -960,7 +1025,8 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                       स्थिति: <b>
                         {selectedDayDetail.status === 'present' ? '🟢 उपस्थित (कक्षा में उपस्थित रहा)' :
                          selectedDayDetail.status === 'absent' ? '🔴 अनुपस्थित' :
-                         selectedDayDetail.status === 'sunday' ? '⚪ रविवार अवकाश' : '🟡 विद्यालय अवकाश'}
+                         selectedDayDetail.status === 'sunday' ? '⚪ रविवार अवकाश' :
+                         selectedDayDetail.status === 'upcoming' ? '⏳ आगामी कार्य दिवस' : '🟡 विद्यालय अवकाश'}
                       </b> • {selectedDayDetail.reason}
                     </p>
                   </div>
@@ -987,7 +1053,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-1.5">
                 <Calendar className="w-4 h-4 text-red-600" />
-                <span>दिनांकवार अनुपस्थिति विवरण (Date-wise Absent Log)</span>
+                <span>दिनांकवार अनुपस्थिति विवरण (20/10/2026 से आगे)</span>
               </h3>
               <span className="text-[11px] font-bold text-slate-500 print:hidden">
                 कुल अनुपस्थित प्रविष्टियाँ: {filteredAbsentDates.length}
@@ -1036,15 +1102,15 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                 </table>
               </div>
             ) : (
-              <div className="border-2 border-dashed border-amber-300 bg-amber-50/60 rounded-2xl p-6 text-center my-2">
-                <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto mb-2.5 shadow-2xs">
-                  <AlertCircle className="w-6 h-6 text-amber-700" />
+              <div className="border-2 border-dashed border-emerald-300 bg-emerald-50/60 rounded-2xl p-6 text-center my-2">
+                <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center mx-auto mb-2.5 shadow-2xs">
+                  <CheckCircle2 className="w-6 h-6 text-emerald-700" />
                 </div>
-                <h4 className="text-base font-black text-amber-950 mb-1">
-                  यह सुविधा इस महीने उपलब्ध नहीं थी। असुविधा के लिए खेद है।
+                <h4 className="text-base font-black text-emerald-950 mb-1">
+                  20 अक्टूबर 2026 से अब तक कोई अनुपस्थिति दर्ज नहीं है (100% नियमित)
                 </h4>
-                <p className="text-xs sm:text-sm text-amber-800 max-w-md mx-auto">
-                  सत्र <b>{summary.academicSession}</b> में इस अवधि का कोई अनुपस्थिति रिकॉर्ड दर्ज नहीं है। अन्य दिवसों में विद्यार्थी उपस्थित था अथवा उस दिन विद्यालय अवकाश (Holiday) मान्य है।
+                <p className="text-xs sm:text-sm text-emerald-800 max-w-md mx-auto">
+                  सत्र <b>2026-27</b> में इस अवधि का कोई अनुपस्थिति रिकॉर्ड दर्ज नहीं है। विद्यार्थी नियमित उपस्थित है अथवा विद्यालय अवकाश मान्य है।
                 </p>
               </div>
             )}
@@ -1059,10 +1125,10 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
             <div className="flex items-center justify-between mb-2.5">
               <h3 className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-1.5">
                 <FileSpreadsheet className="w-4 h-4 text-indigo-600" />
-                <span>माहवार अनुपस्थिति सारांश (Month-wise Absentee Summary)</span>
+                <span>माहवार अनुपस्थिति सारांश (20/10/2026 से 01/01/2028)</span>
               </h3>
               <span className="text-[11px] text-slate-500 font-semibold">
-                सत्र {summary.academicSession}
+                16 माह का अभिलेख
               </span>
             </div>
 
@@ -1088,7 +1154,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                         <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs ${
                           count > 0 
                             ? 'bg-red-100 text-red-800' 
-                            : 'bg-amber-100 text-amber-800'
+                            : 'bg-emerald-100 text-emerald-800'
                         }`}>
                           <CalendarDays className="w-4 h-4" />
                         </div>
@@ -1099,7 +1165,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                           <span className="text-[10px] text-slate-500 font-semibold">
                             {count > 0 
                               ? `${count} कार्य दिवस अनुपस्थित` 
-                              : 'यह सुविधा इस महीने उपलब्ध नहीं थी / अवकाश'}
+                              : '0 अनुपस्थिति दर्ज (नियमित उपस्थिति)'}
                           </span>
                         </div>
                       </div>
@@ -1110,8 +1176,8 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                             {count} दिन
                           </span>
                         ) : (
-                          <span className="px-2.5 py-0.5 rounded-full font-bold text-[10.5px] bg-amber-100 text-amber-900 border border-amber-300">
-                            उपलब्ध नहीं
+                          <span className="px-2.5 py-0.5 rounded-full font-bold text-[10.5px] bg-emerald-100 text-emerald-900 border border-emerald-300">
+                            नियमित (0 दिन)
                           </span>
                         )}
                         {isExpanded ? (
@@ -1146,18 +1212,15 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                                 </span>
                               </div>
                             ))}
-                            <p className="text-[10px] text-slate-500 pt-1 italic">
-                              * शेष दिवसों में छात्र उपस्थित रहा अथवा उस दिन विद्यालय अवकाश था।
-                            </p>
                           </div>
                         ) : (
-                          <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-center">
-                            <div className="flex items-center justify-center gap-1.5 font-bold text-xs text-amber-950 mb-0.5">
-                              <AlertCircle className="w-4 h-4 text-amber-600" />
-                              <span>यह सुविधा इस महीने उपलब्ध नहीं थी। असुविधा के लिए खेद है।</span>
+                          <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-center">
+                            <div className="flex items-center justify-center gap-1.5 font-bold text-xs text-emerald-950 mb-0.5">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                              <span>इस माह में कोई अनुपस्थिति दर्ज नहीं है (100% नियमित)</span>
                             </div>
-                            <p className="text-[10.5px] text-amber-800">
-                              (इस माह में डिजिटल उपस्थिति दर्ज नहीं की गई है अथवा विद्यालय अवकाश मान्य है)
+                            <p className="text-[10.5px] text-emerald-800">
+                              (विद्यार्थी विद्यालय में पूर्णतः उपस्थित रहा अथवा उस दिन शासकीय अवकाश था)
                             </p>
                           </div>
                         )}
@@ -1181,7 +1244,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                 <span>माहवार दिनांक ग्रिड दृश्य (Month & Date Chips Matrix)</span>
               </h3>
               <span className="text-[11px] text-slate-500 font-semibold">
-                सत्र {summary.academicSession}
+                20/10/2026 से 01/01/2028
               </span>
             </div>
 
@@ -1199,9 +1262,9 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                           {group.monthInfo.name}
                         </strong>
                         <span className={`px-2 py-0.5 rounded-md text-[10.5px] font-bold ${
-                          count > 0 ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                          count > 0 ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'
                         }`}>
-                          {count > 0 ? `${count} दिन अनुपस्थित` : 'उपलब्ध नहीं / अवकाश'}
+                          {count > 0 ? `${count} दिन अनुपस्थित` : '100% नियमित उपस्थित'}
                         </span>
                       </div>
                     </div>
@@ -1224,9 +1287,9 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                         ))}
                       </div>
                     ) : (
-                      <div className="p-2.5 bg-amber-50/70 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                        <span>यह सुविधा इस महीने उपलब्ध नहीं थी। असुविधा के लिए खेद है। (विद्यालय अवकाश)</span>
+                      <div className="p-2.5 bg-emerald-50/70 border border-emerald-200 rounded-xl text-emerald-900 text-xs flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>इस माह में विद्यार्थी की कोई अनुपस्थिति नहीं है।</span>
                       </div>
                     )}
                   </div>
@@ -1239,7 +1302,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
         {/* ALWAYS INCLUDED IN PRINT: Official Month-wise Summary Table */}
         <div className="hidden print:block mb-4 relative z-10">
           <h3 className="text-xs font-black text-slate-900 mb-1">
-            माहवार उपस्थिति एवं अनुपस्थिति सारांश (Month-wise Attendance Summary)
+            माहवार उपस्थिति एवं अनुपस्थिति सारांश (Month-wise Attendance Summary: 20/10/2026 से 01/01/2028)
           </h3>
           <table className="w-full text-left text-[11px] border-collapse border border-black mb-3">
             <thead>
@@ -1261,7 +1324,7 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
                   <td className="py-1 px-2 border border-black">
                     {group.records.length > 0 
                       ? `${group.records.length} दिन अनुपस्थित (${group.records.map((r) => r.date).join(', ')})`
-                      : 'यह सुविधा इस महीने उपलब्ध नहीं थी (विद्यालय अवकाश / नियमित उपस्थिति)'}
+                      : '0 अनुपस्थिति (विद्यार्थी नियमित उपस्थित रहा)'}
                   </td>
                 </tr>
               ))}
@@ -1315,10 +1378,73 @@ export const StudentAttendanceView: React.FC<StudentAttendanceViewProps> = ({
             {SCHOOL_INFO.schoolName} (स्कॉलर: {student.scholarNo})
           </span>
           <span>
-            अधिकृत उपस्थिति अभिलेख
+            अधिकृत उपस्थिति अभिलेख (20/10/2026 से 01/01/2028)
           </span>
         </div>
 
+      </div>
+
+      {/* ========================================================================= */}
+      {/* BOTTOM ACTIONS BAR (Placed at the bottom as specifically requested by user)*/}
+      {/* प्रिंट रसीद / विवरण, JPG डाउनलोड (A4), WhatsApp शेयर (JPG), लॉगआउट         */}
+      {/* ========================================================================= */}
+      <div className="mt-6 pt-4 border-t-2 border-slate-300 print:hidden flex flex-wrap items-center justify-between gap-3 bg-white p-4 sm:p-5 rounded-2xl border shadow-md">
+        <div className="flex items-center gap-2">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs sm:text-sm rounded-xl border border-slate-300 shadow-xs flex items-center gap-1.5 cursor-pointer transition-all hover:-translate-x-0.5"
+            >
+              <ArrowLeft className="w-4 h-4 text-blue-600" />
+              <span>← मुख्य विकल्प</span>
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <Printer className="w-4 h-4" />
+            <span>प्रिंट विवरण (A4)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownloadJpg}
+            disabled={isDownloadingJpg}
+            className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+            title="उपस्थिति विवरण को A4 JPG फोटो फॉर्मेट में सीधे डाउनलोड करें"
+          >
+            <Download className="w-4 h-4" />
+            <span>{isDownloadingJpg ? 'JPG बन रहा है...' : 'JPG डाउनलोड (A4)'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleWhatsAppShare}
+            disabled={isSharingWhatsApp}
+            className="px-4 py-2.5 bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+            title="उपस्थिति विवरण WhatsApp पर भेजें"
+          >
+            <Share2 className="w-4 h-4" />
+            <span>{isSharingWhatsApp ? 'शेयर हो रहा है...' : 'WhatsApp शेयर (JPG)'}</span>
+          </button>
+
+          {onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4 text-red-400" />
+              <span>लॉगआउट</span>
+            </button>
+          )}
+        </div>
       </div>
 
     </div>

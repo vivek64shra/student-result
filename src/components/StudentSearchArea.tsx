@@ -29,10 +29,6 @@ export const StudentSearchArea: React.FC<StudentSearchAreaProps> = ({
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputVal.trim()) {
-      alert('कृपया स्कॉलर नंबर अथवा रोल नंबर दर्ज करें!');
-      return;
-    }
     onSearch(inputVal.trim());
   };
 

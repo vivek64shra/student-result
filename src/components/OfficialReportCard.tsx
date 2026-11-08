@@ -13,6 +13,7 @@ import {
   MessageSquareText,
   ExternalLink,
   Download,
+  Share2,
   Image as ImageIcon
 } from 'lucide-react';
 import { 
@@ -23,7 +24,7 @@ import {
   getCurrentPrintTimestamp 
 } from '../utils/reportCardParser';
 import { MAIN_SCHOOL_WEBSITE_URL } from './LoginPage';
-import { downloadElementAsJpg } from '../utils/imageExporter';
+import { downloadElementAsJpg, shareElementAsJpg } from '../utils/imageExporter';
 
 interface OfficialReportCardProps {
   student: ParsedStudent;
@@ -43,6 +44,7 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
   lastUpdated,
 }) => {
   const [isDownloadingJpg, setIsDownloadingJpg] = useState(false);
+  const [isSharingWhatsApp, setIsSharingWhatsApp] = useState(false);
 
   const handlePrint = () => {
     if (onPrint) {
@@ -58,6 +60,19 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
       `Marksheet_${student.scholarNo || student.rollNo || 'Student'}`,
       setIsDownloadingJpg
     );
+  };
+
+  const handleWhatsAppShare = async () => {
+    const fileName = `Marksheet_${student.scholarNo || student.rollNo || 'Student'}.jpg`;
+    const shareTitle = `${SCHOOL_INFO.schoolName} - छात्र अंकसूची (Report Card)`;
+    const shareText = 
+      `📋 विद्यार्थी: ${student.name}\n` +
+      `स्कॉलर नं.: ${student.scholarNo} | रोल नं.: ${student.rollNo}\n` +
+      `कक्षा: ${student.className}\n` +
+      `सत्र: ${SCHOOL_INFO.academicSession}\n\n` +
+      `${SCHOOL_INFO.schoolName}`;
+
+    await shareElementAsJpg('marksheet', fileName, shareTitle, shareText, setIsSharingWhatsApp);
   };
 
   const isExamSectionValid = (section: ParsedStudent['quarterly'] | ParsedStudent['halfYearly'] | ParsedStudent['annual']) => {
@@ -271,7 +286,7 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
 
   return (
     <div className="max-w-[1050px] mx-auto">
-      {/* Top Action Bar for Back, Print, JPG Download, Feedback & Logout (Single non-repeating bar) */}
+      {/* Top Bar: Clean Navigation */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3 print:hidden print-hidden">
         <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
           {onBack && (
@@ -295,39 +310,6 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
             <MessageSquareText className="w-4 h-4 text-amber-700" />
             <span>फीडबैक ↗</span>
           </a>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto justify-end">
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="px-3.5 sm:px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
-          >
-            <Printer className="w-4 h-4" />
-            <span>प्रिंट अंकसूची</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleDownloadJpg}
-            disabled={isDownloadingJpg}
-            className="px-3.5 sm:px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
-            title="अंकसूची को A4 साइज JPG फोटो फॉर्मेट में सीधे मोबाइल में सेव करें"
-          >
-            <Download className="w-4 h-4" />
-            <span>{isDownloadingJpg ? 'JPG बन रहा है...' : 'JPG डाउनलोड (A4)'}</span>
-          </button>
-
-          {onLogout && (
-            <button
-              type="button"
-              onClick={onLogout}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <LogOut className="w-4 h-4 text-red-400" />
-              <span>लॉगआउट</span>
-            </button>
-          )}
         </div>
       </div>
 
@@ -502,6 +484,66 @@ export const OfficialReportCard: React.FC<OfficialReportCardProps> = ({
               अधिकृत कंप्यूटरीकृत अंकसूची
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* Bottom Actions Bar (As requested: Print, JPG Download, WhatsApp Share, Logout placed at the bottom) */}
+      <div className="mt-6 pt-4 border-t-2 border-slate-300 print:hidden flex flex-wrap items-center justify-between gap-3 bg-white p-4 sm:p-5 rounded-2xl border shadow-md">
+        <div className="flex items-center gap-2">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs sm:text-sm rounded-xl border border-slate-300 shadow-xs flex items-center gap-1.5 cursor-pointer transition-all hover:-translate-x-0.5"
+            >
+              <ArrowLeft className="w-4 h-4 text-blue-600" />
+              <span>← मुख्य विकल्प</span>
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <Printer className="w-4 h-4" />
+            <span>प्रिंट अंकसूची</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownloadJpg}
+            disabled={isDownloadingJpg}
+            className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+            title="अंकसूची को A4 साइज JPG फोटो फॉर्मेट में सीधे मोबाइल में सेव करें"
+          >
+            <Download className="w-4 h-4" />
+            <span>{isDownloadingJpg ? 'JPG बन रहा है...' : 'JPG डाउनलोड (A4)'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleWhatsAppShare}
+            disabled={isSharingWhatsApp}
+            className="px-4 py-2.5 bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+            title="अंकसूची WhatsApp पर JPG फोटो के रूप में भेजें"
+          >
+            <Share2 className="w-4 h-4" />
+            <span>{isSharingWhatsApp ? 'शेयर हो रहा है...' : 'WhatsApp शेयर (JPG)'}</span>
+          </button>
+
+          {onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4 text-red-400" />
+              <span>लॉगआउट</span>
+            </button>
+          )}
         </div>
       </div>
     </div>

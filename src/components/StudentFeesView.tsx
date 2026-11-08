@@ -117,7 +117,7 @@ export const StudentFeesView: React.FC<StudentFeesViewProps> = ({
   return (
     <div id="fee-receipt" className="fee-receipt-container max-w-[1020px] mx-auto">
       
-      {/* Top Action Bar: Single consolidated non-repeating controls */}
+      {/* Top Bar: Clean Navigation */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3 print:hidden print-hidden">
         <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
           {onBack && (
@@ -141,50 +141,6 @@ export const StudentFeesView: React.FC<StudentFeesViewProps> = ({
             <MessageSquareText className="w-4 h-4 text-amber-700" />
             <span>फीडबैक ↗</span>
           </a>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto justify-end">
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="px-3.5 sm:px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-          >
-            <Printer className="w-4 h-4" />
-            <span>प्रिंट रसीद</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleDownloadJpg}
-            disabled={isDownloadingJpg}
-            className="px-3.5 sm:px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
-            title="रसीद को A4 साइज JPG फोटो फॉर्मेट में सीधे मोबाइल में सेव करें"
-          >
-            <Download className="w-4 h-4" />
-            <span>{isDownloadingJpg ? 'JPG बन रहा है...' : 'JPG डाउनलोड (A4)'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleWhatsAppShare}
-            disabled={isSharingWhatsApp}
-            className="px-3.5 py-2 bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
-            title="शुल्क विवरण WhatsApp पर JPG फोटो के रूप में भेजें"
-          >
-            <Share2 className="w-4 h-4" />
-            <span>{isSharingWhatsApp ? 'JPG शेयर हो रहा है...' : 'WhatsApp शेयर (JPG)'}</span>
-          </button>
-
-          {onLogout && (
-            <button
-              type="button"
-              onClick={onLogout}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <LogOut className="w-4 h-4 text-red-400" />
-              <span>लॉगआउट</span>
-            </button>
-          )}
         </div>
       </div>
 
@@ -608,6 +564,66 @@ export const StudentFeesView: React.FC<StudentFeesViewProps> = ({
           </span>
         </div>
 
+      </div>
+
+      {/* Bottom Actions Bar (As requested: Print, JPG Download, WhatsApp Share, Logout placed at the bottom) */}
+      <div className="mt-6 pt-4 border-t-2 border-slate-300 print:hidden flex flex-wrap items-center justify-between gap-3 bg-white p-4 sm:p-5 rounded-2xl border shadow-md">
+        <div className="flex items-center gap-2">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs sm:text-sm rounded-xl border border-slate-300 shadow-xs flex items-center gap-1.5 cursor-pointer transition-all hover:-translate-x-0.5"
+            >
+              <ArrowLeft className="w-4 h-4 text-blue-600" />
+              <span>← मुख्य विकल्प</span>
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <Printer className="w-4 h-4" />
+            <span>प्रिंट रसीद</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownloadJpg}
+            disabled={isDownloadingJpg}
+            className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+            title="रसीद को A4 साइज JPG फोटो फॉर्मेट में सीधे मोबाइल में सेव करें"
+          >
+            <Download className="w-4 h-4" />
+            <span>{isDownloadingJpg ? 'JPG बन रहा है...' : 'JPG डाउनलोड (A4)'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleWhatsAppShare}
+            disabled={isSharingWhatsApp}
+            className="px-4 py-2.5 bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+            title="शुल्क विवरण WhatsApp पर JPG फोटो के रूप में भेजें"
+          >
+            <Share2 className="w-4 h-4" />
+            <span>{isSharingWhatsApp ? 'JPG शेयर हो रहा है...' : 'WhatsApp शेयर (JPG)'}</span>
+          </button>
+
+          {onLogout && (
+            <button
+              type="button"
+              onClick={onLogout}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4 text-red-400" />
+              <span>लॉगआउट</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
